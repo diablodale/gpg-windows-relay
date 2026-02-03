@@ -1,7 +1,7 @@
 {
   "name": "gpg-agent-relay",
   "displayName": "GPG Agent Relay",
-  "description": "Relays GPG agent protocol to Windows host running gpg4win",
+  "description": "Relays GPG agent protocol to Windows host running Gpg4win",
   "version": "0.0.1",
   "publisher": "local",
   "engines": {
@@ -42,8 +42,8 @@
       "properties": {
         "gpgRelay.gpg4winPath": {
           "type": "string",
-          "default": "C:\\Program Files (x86)\\GnuPG\\bin",
-          "description": "Path to gpg4win installation directory"
+          "default": "",
+          "description": "Path to Gpg4win's GnuPG bin directory containing gpgconf.exe. Leave empty to auto-detect (checks Program Files 64-bit, then Program Files (x86))"
         },
         "gpgRelay.autoStart": {
           "type": "boolean",

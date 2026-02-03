@@ -1,9 +1,9 @@
 /**
  * GPG Agent Relay Implementation
- * 
+ *
  * This module handles the actual relay between Linux remote (WSL/container) GPG agent
- * and Windows host gpg4win named pipes.
- * 
+ * and Windows host Gpg4win named pipes.
+ *
  * The relay uses:
  * - npiperelay.exe (or socat on Windows) to bridge Unix domain sockets to Windows named pipes
  * - socat in the remote environment to forward the GPG agent socket
@@ -23,6 +23,7 @@ export interface RelayConfig {
 export class GpgRelay {
     private processes: ChildProcess[] = [];
     private logCallback?: (message: string) => void;
+    private detectedGpg4winPath: string | null = null;
 
     constructor(private config: RelayConfig) {}
 
@@ -31,6 +32,13 @@ export class GpgRelay {
      */
     public setLogCallback(callback: (message: string) => void): void {
         this.logCallback = callback;
+    }
+
+    /**
+     * Get the detected Gpg4win path
+     */
+    public getGpg4winPath(): string | null {
+        return this.detectedGpg4winPath;
     }
 
     private log(message: string): void {
@@ -45,15 +53,23 @@ export class GpgRelay {
     public async start(): Promise<void> {
         this.log('Starting GPG relay...');
 
-        // Verify gpg4win installation
-        const gpgAgentPath = path.join(this.config.gpg4winPath, 'gpg-agent.exe');
-        this.log(`Checking for gpg-agent at: ${gpgAgentPath}`);
-        
-        if (!fs.existsSync(gpgAgentPath)) {
-            throw new Error(`GPG agent not found at: ${gpgAgentPath}`);
+        // Find Gpg4win installation
+        this.log('Searching for Gpg4win installation...');
+        const gpg4winPath = await this.findGpg4WinPath();
+        if (!gpg4winPath) {
+            throw new Error('GPG4Win not found. Please install Gpg4win or configure gpgRelay.gpg4winPath');
         }
-        
-        this.log('gpg-agent.exe found');
+        this.detectedGpg4winPath = gpg4winPath;        this.log(`Found Gpg4win at: ${gpg4winPath}`);
+
+        // Verify gpgconf.exe exists (utilities tool from Gpg4win)
+        const gpgconfPath = path.join(gpg4winPath, 'gpgconf.exe');
+        this.log(`Checking for gpgconf.exe at: ${gpgconfPath}`);
+
+        if (!fs.existsSync(gpgconfPath)) {
+            throw new Error(`gpgconf.exe not found at: ${gpgconfPath}`);
+        }
+
+        this.log('gpgconf.exe found - Gpg4win is properly installed');
 
         // Find the Windows GPG agent socket/pipe
         this.log('Looking for GPG agent named pipe...');
@@ -69,11 +85,11 @@ export class GpgRelay {
         // 1. Installing/checking for npiperelay.exe on Windows
         // 2. Setting up socat in the remote environment
         // 3. Creating the bridge between remote socket and Windows pipe
-        
+
         // For WSL, the typical setup is:
         // - Windows side: npiperelay.exe -ep -s //./pipe/gpg-agent
         // - WSL side: socat UNIX-LISTEN:/path/to/socket,fork EXEC:"npiperelay.exe -ep -s //./pipe/gpg-agent",nofork
-        
+
         this.log('Relay setup complete (implementation pending)');
         this.processes = []; // Mark as started even though actual relay isn't running yet
     }
@@ -83,13 +99,13 @@ export class GpgRelay {
      */
     public stop(): void {
         this.log('Stopping GPG relay...');
-        
+
         for (const proc of this.processes) {
             if (!proc.killed) {
                 proc.kill();
             }
         }
-        
+
         this.processes = [];
         this.log('Relay stopped');
     }
@@ -102,16 +118,66 @@ export class GpgRelay {
     }
 
     /**
+     * Find GPG4Win installation directory
+     * Checks in order: config path, 64-bit default, 32-bit default
+     */
+    private async findGpg4WinPath(): Promise<string | null> {
+        // 1. Try configured path first
+        if (this.config.gpg4winPath) {
+            const testPath = path.join(this.config.gpg4winPath, 'gpgconf.exe');
+            if (fs.existsSync(testPath)) {
+                this.log(`Found Gpg4win at configured path: ${this.config.gpg4winPath}`);
+                return this.config.gpg4winPath;
+            } else {
+                this.log(`Configured path does not contain gpgconf.exe: ${this.config.gpg4winPath}`);
+            }
+        }
+
+        // 2. Try 64-bit default location (newer Gpg4win)
+        const gpg4win64Paths = [
+            'C:\\Program Files\\GnuPG\\bin',
+            'C:\\Program Files\\Gpg4win\\bin'
+        ];
+
+        for (const checkPath of gpg4win64Paths) {
+            const testPath = path.join(checkPath, 'gpgconf.exe');
+            this.log(`Checking 64-bit location: ${checkPath}`);
+            if (fs.existsSync(testPath)) {
+                this.log(`Found Gpg4win at 64-bit location: ${checkPath}`);
+                return checkPath;
+            }
+        }
+
+        // 3. Try 32-bit (x86) fallback location
+        const gpg4win32Paths = [
+            'C:\\Program Files (x86)\\GnuPG\\bin',
+            'C:\\Program Files (x86)\\Gpg4win\\bin'
+        ];
+
+        for (const checkPath of gpg4win32Paths) {
+            const testPath = path.join(checkPath, 'gpgconf.exe');
+            this.log(`Checking x86 location: ${checkPath}`);
+            if (fs.existsSync(testPath)) {
+                this.log(`Found Gpg4win at x86 location: ${checkPath}`);
+                return checkPath;
+            }
+        }
+
+        this.log('Gpg4win not found in any standard location');
+        return null;
+    }
+
+    /**
      * Find the GPG agent named pipe on Windows
      */
     private async findGpgAgentPipe(): Promise<string | null> {
         // Windows GPG agent uses named pipes in the format:
         // //./pipe/gpg-agent or //./pipe/gpg-agent-extra or similar
-        
+
         // First, try to get the pipe name from gpg-agent
         const homeDir = os.homedir();
         const gnupgDir = path.join(homeDir, 'AppData', 'Roaming', 'gnupg');
-        
+
         // Check for gpg-agent socket info file
         const socketFiles = [
             path.join(gnupgDir, 'S.gpg-agent'),

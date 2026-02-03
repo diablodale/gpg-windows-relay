@@ -1,15 +1,15 @@
 # GPG Agent Relay for VS Code
 
-**Windows-only extension** that relays GPG agent protocol between Linux remotes (WSL, Dev Containers, SSH) and Windows host running gpg4win.
+**Windows-only extension** that relays GPG agent protocol between Linux remotes (WSL, Dev Containers, SSH) and Windows host running Gpg4win.
 
 ## 🎯 Purpose
 
-When working in a remote Linux environment from VS Code on Windows, GPG operations (signing commits, decrypting files) typically fail because the remote can't access your Windows GPG keys. This extension bridges that gap by forwarding GPG agent requests from the remote to your Windows gpg4win installation.
+When working in a remote Linux environment from VS Code on Windows, GPG operations (signing commits, decrypting files) typically fail because the remote can't access your Windows GPG keys. This extension bridges that gap by forwarding GPG agent requests from the remote to your Windows Gpg4win installation.
 
 ## ⚠️ Requirements
 
 - **Windows host** (this extension only runs on Windows)
-- **gpg4win** installed on Windows
+- **Gpg4win** installed on Windows
 - **npiperelay.exe** for pipe/socket bridging (optional, will be auto-installed)
 - Remote environment: WSL, Dev Container, or SSH
 

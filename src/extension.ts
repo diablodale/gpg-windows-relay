@@ -1,12 +1,15 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { GpgRelay } from './gpgRelay';
 
 // Relay state management
 let relay: GpgRelay | null = null;
 let outputChannel: vscode.OutputChannel;
 let statusBarItem: vscode.StatusBarItem;
+let detectedGpg4winPath: string | null = null;
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -36,6 +39,9 @@ export function activate(context: vscode.ExtensionContext) {
 	updateStatusBar();
 	statusBarItem.show();
 
+	// Detect Gpg4win path on startup (for quick status display)
+	detectGpg4winPath();
+
 	// Check for remote connection and auto-start if configured
 	const config = vscode.workspace.getConfiguration('gpgRelay');
 	if (config.get('autoStart') && isRemoteSession()) {
@@ -49,6 +55,49 @@ function isRemoteSession(): boolean {
 	return !!vscode.env.remoteName; // remoteName is set when connected to WSL, SSH, containers, etc.
 }
 
+// Detect Gpg4win installation path
+async function detectGpg4winPath(): Promise<void> {
+	const config = vscode.workspace.getConfiguration('gpgRelay');
+	const configPath = config.get<string>('gpgRelay.gpg4winPath') || '';
+
+	// Check configured path first
+	if (configPath) {
+		const gpgconfPath = path.join(configPath, 'gpgconf.exe');
+		if (fs.existsSync(gpgconfPath)) {
+			detectedGpg4winPath = configPath;
+			return;
+		}
+	}
+
+	// Check 64-bit default locations
+	const gpg4win64Paths = [
+		'C:\\Program Files\\GnuPG\\bin',
+		'C:\\Program Files\\Gpg4win\\bin'
+	];
+
+	for (const checkPath of gpg4win64Paths) {
+		const gpgconfPath = path.join(checkPath, 'gpgconf.exe');
+		if (fs.existsSync(gpgconfPath)) {
+			detectedGpg4winPath = checkPath;
+			return;
+		}
+	}
+
+	// Check 32-bit (x86) default locations
+	const gpg4win32Paths = [
+		'C:\\Program Files (x86)\\GnuPG\\bin',
+		'C:\\Program Files (x86)\\Gpg4win\\bin'
+	];
+
+	for (const checkPath of gpg4win32Paths) {
+		const gpgconfPath = path.join(checkPath, 'gpgconf.exe');
+		if (fs.existsSync(gpgconfPath)) {
+			detectedGpg4winPath = checkPath;
+			return;
+		}
+	}
+}
+
 // Start the GPG relay
 async function startRelay() {
 	if (relay?.isRunning()) {
@@ -58,13 +107,13 @@ async function startRelay() {
 
 	try {
 		const config = vscode.workspace.getConfiguration('gpgRelay');
-		const gpg4winPath = config.get<string>('gpg4winPath') || 'C:\\Program Files (x86)\\GnuPG\\bin';
+		const gpg4winPath = config.get<string>('gpg4winPath') || '';
 		const debugLogging = config.get<boolean>('debugLogging') || false;
 
 		outputChannel.appendLine('🚀 Starting GPG agent relay...');
 
 		if (debugLogging) {
-			outputChannel.appendLine(`GPG4Win path: ${gpg4winPath}`);
+			outputChannel.appendLine(`Config GPG4Win path: ${gpg4winPath || '(auto-detect)'}`);
 			outputChannel.appendLine(`Remote name: ${vscode.env.remoteName || 'none'}`);
 		}
 
@@ -84,6 +133,7 @@ async function startRelay() {
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		outputChannel.appendLine(`❌ Error starting relay: ${errorMessage}`);
+		outputChannel.show(true); // Show the output panel
 		vscode.window.showErrorMessage(`Failed to start GPG relay: ${errorMessage}`);
 		relay = null;
 	}
@@ -116,6 +166,8 @@ function showStatus() {
 	const isRunning = relay?.isRunning() || false;
 	const remoteName = vscode.env.remoteName || 'none';
 	const config = vscode.workspace.getConfiguration('gpgRelay');
+	// Use relay's detected path if relay is running, otherwise use global detected path
+	const gpg4winPath = relay?.getGpg4winPath() || detectedGpg4winPath || '(not detected)';
 
 	const status = [
 		`GPG Agent Relay Status`,
@@ -124,7 +176,7 @@ function showStatus() {
 		`Remote Session: ${remoteName}`,
 		`Auto-start: ${config.get('autoStart') ? 'Enabled' : 'Disabled'}`,
 		`Debug Logging: ${config.get('debugLogging') ? 'Enabled' : 'Disabled'}`,
-		`GPG4Win Path: ${config.get('gpg4winPath')}`
+		`GPG4Win Path: ${gpg4winPath}`
 	].join('\n');
 
 	vscode.window.showInformationMessage(status, { modal: true });
