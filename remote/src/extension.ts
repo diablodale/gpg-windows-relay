@@ -6,7 +6,7 @@
  */
 
 import * as vscode from 'vscode';
-import { startRemoteRelay } from './remoteRelay';
+import { startRemoteRelay } from './services/remoteRelay';
 
 let relayInstance: Awaited<ReturnType<typeof startRemoteRelay>> | null = null;
 

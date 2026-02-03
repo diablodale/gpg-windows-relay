@@ -111,7 +111,7 @@ gpg-windows-relay/
 **Files:**
 
 - `remote/src/extension.ts` - Remote extension
-- `remote/src/remoteRelay.ts` - Relay service (unified for all remote types)
+- `remote/src/services/remoteRelay.ts` - Relay service (unified for all remote types)
 
 #### 3. Pack Extension (`pack/`)
 
@@ -198,7 +198,8 @@ Gpg4win's Assuan socket file contains:
 ├── remote/
 │   ├── src/
 │   │   ├── extension.ts           # Remote workspace context
-│   │   └── remoteRelay.ts         # Unified relay service
+│   │   └── services/
+│   │       └── remoteRelay.ts     # Unified relay service
 │   ├── package.json
 │   └── tsconfig.json
 ├── pack/
@@ -310,4 +311,4 @@ Check output channels:
 For detailed architecture notes, see code comments in:
 
 - `bridge/src/services/assuanBridge.ts` - Assuan protocol details
-- `remote/src/remoteRelay.ts` - Relay implementation
+- `remote/src/services/remoteRelay.ts` - Relay implementation
