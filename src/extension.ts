@@ -148,25 +148,16 @@ async function detectNpipeRelay(): Promise<void> {
 function checkNpipeRelayAvailability(): Promise<string | null> {
 	return new Promise((resolve) => {
 		try {
-			const proc = spawn('npiperelay', ['-v'], {
+			const proc = spawn('npiperelay.exe', ['--help'], {
 				stdio: ['ignore', 'pipe', 'pipe'],
 				timeout: 1000,
 				shell: true
 			});
 
-			let found = false;
-
-			proc.stdout?.on('data', () => {
-				found = true;
-			});
-
-			proc.stderr?.on('data', () => {
-				found = true;
-			});
-
-			proc.on('exit', () => {
-				if (found) {
-					resolve('npiperelay'); // Just return the command name if found in PATH
+			proc.on('exit', (code) => {
+				// Exit code 0 means success
+				if (code === 0) {
+					resolve('npiperelay.exe');
 				} else {
 					resolve(null);
 				}
@@ -181,7 +172,7 @@ function checkNpipeRelayAvailability(): Promise<string | null> {
 				if (!proc.killed) {
 					proc.kill();
 				}
-				resolve(found ? 'npiperelay' : null);
+				resolve(null);
 			}, 1000);
 		} catch (error) {
 			resolve(null);
@@ -310,9 +301,9 @@ function showStatus() {
 		`Auto-start: ${config.get('autoStart') ? 'Enabled' : 'Disabled'}`,
 		`Debug Logging: ${config.get('debugLogging') ? 'Enabled' : 'Disabled'}`,
 		``,
-		`GPG4Win Path: ${gpg4winPath}`,
-		`Agent Pipe: ${agentPipe}`,
-		`npiperelay Path: ${npipeRelayPath}`
+		`Gpg4win: ${gpg4winPath}`,
+		`gpg agent pipe: ${agentPipe}`,
+		`npiperelay: ${npipeRelayPath}`
 	].join('\n');
 
 	vscode.window.showInformationMessage(status, { modal: true });

@@ -151,7 +151,7 @@ export class GpgRelay {
     private async findNpipeRelay(): Promise<string | null> {
         // 1. Check if npiperelay is in PATH
         this.log('Checking PATH for npiperelay.exe...');
-        const inPath = await this.checkCommandInPath('npiperelay.exe');
+        const inPath = await this.checkCommandInPath('npiperelay.exe', ['--help']);
         if (inPath) {
             this.log('Found npiperelay.exe in PATH');
             return 'npiperelay.exe';
@@ -187,15 +187,17 @@ export class GpgRelay {
     /**
      * Check if a command exists in PATH
      */
-    private async checkCommandInPath(command: string): Promise<boolean> {
+    private async checkCommandInPath(command: string, args: string[] = []): Promise<boolean> {
         return new Promise((resolve) => {
             try {
-                const proc = spawn(command, ['--version'], {
+                const proc = spawn(command, args, {
                     stdio: 'ignore',
-                    timeout: 1000
+                    timeout: 1000,
+                    shell: true
                 });
 
                 proc.on('exit', (code) => {
+                    // Exit code 0 means command was successful
                     resolve(code === 0);
                 });
 
@@ -268,7 +270,7 @@ export class GpgRelay {
         return new Promise((resolve) => {
             try {
                 this.log(`Running: ${gpgconfPath} --list-dirs agent-socket`);
-                
+
                 const proc = spawn(gpgconfPath, ['--list-dir', 'agent-socket'], {
                     stdio: ['ignore', 'pipe', 'pipe']
                 });
