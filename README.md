@@ -1,39 +1,57 @@
 # GPG Windows Relay for VS Code
 
-**Windows-only extension** that relays GPG agent protocols between Linux remotes (WSL, Dev Containers, SSH) and Windows host running Gpg4win.
+Relays GPG agent protocols between Linux remotes (WSL, Dev Containers, SSH) and Windows host running Gpg4win using a **three-extension pack architecture**.
 
 ## 🎯 Purpose
 
-When working in a remote Linux environment from VS Code on Windows, GPG operations (signing commits, decrypting files) typically fail because the remote can't access your Windows GPG keys. This extension bridges that gap by forwarding GPG agent requests from the remote to your Windows Gpg4win installation.
+When working in a remote Linux environment from VS Code on Windows, GPG operations (signing commits, decrypting files) typically fail because the remote can't access your Windows GPG keys. This extension pack bridges that gap by forwarding GPG agent requests from the remote to your Windows Gpg4win installation.
 
 ## ⚠️ Requirements
 
-- **Windows host** (this extension only runs on Windows UI context)
-- **Gpg4win** installed on Windows
+- **Windows host** with Gpg4win installed
 - Remote environment: WSL, Dev Container, or SSH
 - VS Code v1.91.0+ with remote support
 
 ## 📦 Installation
 
-1. Build the extension:
+### From Source
+
+1. Build the extensions:
 
    ```powershell
-   npm install
-   npm run compile
+   cd bridge && npm install && npm run compile
+   cd ../remote && npm install && npm run compile
+   cd ../pack && npm install
    ```
 
-2. Install in VS Code:
-   - Press `F5` to launch Extension Development Host, OR
-   - Package with `npm run package` and install the `.vsix` file
+2. Package:
+
+   ```powershell
+   cd bridge && npm run package
+   cd ../remote && npm run package
+   cd ../pack && npm run package
+   ```
+
+3. Install `.vsix` files in order:
+   - `bridge/gpg-windows-relay-bridge-*.vsix` (Windows bridge)
+   - `remote/gpg-windows-relay-remote-*.vsix` (Remote relay)
+   - Or install the pack which includes both
 
 ## 🚀 Usage
 
 ### Commands
 
+**On Windows host:**
+
 - **GPG Windows Relay: Start** - Start the Assuan bridge
-- **GPG Windows Relay: Stop** - Stop the Assuan bridge
+- **GPG Windows Relay: Stop** - Stop the bridge
 - **GPG Windows Relay: Restart** - Restart the bridge
-- **GPG Windows Relay: Show Status** - Display current bridge status
+- **GPG Windows Relay: Show Status** - Display bridge status
+
+**On Remote:**
+
+- **GPG Windows Relay: Start** - Start the remote relay (auto-starts by default)
+- **GPG Windows Relay: Stop** - Stop the remote relay
 
 ### Configuration
 
@@ -42,226 +60,254 @@ Open VS Code settings and configure:
 ```json
 {
   "gpgWinRelay.gpg4winPath": "C:\\Program Files\\GnuPG\\bin",
-  "gpgWinRelay.autoStart": true
+  "gpgWinRelay.autoStart": true,
+  "gpgWinRelay.listenPort": 63331,
+  "gpgWinRelay.debugLogging": false
 }
 ```
 
 ### Typical Workflow
 
 1. Open VS Code on Windows
-2. Connect to WSL/Container/SSH remote
-3. Run command **GPG Windows Relay: Start** (or enable `autoStart`)
-4. The bridge automatically starts on Windows and connects with the remote
+2. Bridge extension auto-starts (or run **GPG Windows Relay: Start**)
+3. Connect to WSL/Container/SSH remote
+4. Remote relay auto-starts (or run **GPG Windows Relay: Start**)
 5. GPG operations in the remote now work with your Windows keys
 
-## 🔧 Architecture
+## 🏗️ Architecture
 
-### Design Philosophy
+### Three-Extension Pack Approach
 
-**Pure Node.js, zero-dependency solution** leveraging VS Code's native multi-context extension support:
+This project uses a **monorepo structure** with three separate extensions:
 
-- **UI Context (Windows)**: Manages Assuan bridge to gpg-agent, exposes relay port via command IPC
-- **Workspace Context (Remote)**: Runs automatically on WSL/container/SSH, queries Windows for relay port, creates local Unix socket listener
-- **IPC**: VS Code command execution between contexts
-- **Networking**: VS Code automatically tunnels `localhost:PORT` for all three remote types
+```
+gpg-windows-relay/
+├── bridge/          # Windows-only Assuan bridge
+├── remote/          # Remote relay (WSL/Container/SSH)
+└── pack/            # Extension pack (installs both)
+```
 
-### How Assuan Sockets Work
+#### 1. Bridge Extension (`bridge/`)
 
-Gpg4win exposes the GPG agent via an Assuan socket file:
+- **Name:** `gpg-windows-relay-bridge`
+- **Runs on:** Windows only (`"os": ["win32"]`)
+- **Context:** UI context only
+- **Activation:** Auto-starts on VS Code launch
+- **Responsibility:** Manages Assuan bridge to gpg-agent
+
+**Files:**
+
+- `bridge/src/extension.ts` - Main extension
+- `bridge/src/services/assuanBridge.ts` - Assuan bridge implementation
+
+#### 2. Remote Extension (`remote/`)
+
+- **Name:** `gpg-windows-relay-remote`
+- **Runs on:** WSL, Dev Containers, SSH (any non-Windows remote)
+- **Context:** Workspace context only
+- **Activation:** Auto-starts when connecting to remote
+- **Responsibility:** Manages relay from remote GPG to Windows bridge
+
+**Files:**
+
+- `remote/src/extension.ts` - Remote extension
+- `remote/src/remoteRelay.ts` - Relay service (unified for all remote types)
+
+#### 3. Pack Extension (`pack/`)
+
+- **Name:** `gpg-windows-relay`
+- **Type:** Extension pack (no code)
+- **Responsibility:** Bundles bridge and remote extensions
+
+**Why a pack?**
+
+- Single installation point for users
+- Both extensions install automatically
+- Cleaner dependency management
+- Separate concerns: bridge only runs on Windows, relay only on remotes
+
+### How It Works
+
+```
+Windows Host
+├─ Gpg4win agent (Assuan socket on localhost:XXXX)
+│  ↑
+├─ Bridge Extension (gpg-windows-relay-bridge)
+│  ├─ Reads: C:\Users\<user>\AppData\Roaming\gnupg\S.gpg-agent
+│  ├─ Extracts: TCP port + 16-byte nonce
+│  ├─ Listens on: localhost:63331
+│  ↑
+├─ localhost:63331 (tunneled by VS Code)
+│  ↑
+Remote Environment (WSL/Container/SSH)
+├─ Remote Extension (gpg-windows-relay-remote)
+│  ├─ Creates Unix socket: /run/user/1000/gnupg/S.gpg-agent
+│  ├─ Connects to: localhost:63331 (via VS Code tunnel)
+│  ├─ Pipes bidirectionally
+│  ↑
+├─ Local GPG client (gpg --sign, etc.)
+```
+
+### Assuan Socket Protocol
+
+Gpg4win's Assuan socket file contains:
 
 ```text
-C:\Users\<user>\AppData\Roaming\gnupg\S.gpg-agent
-
-File contents:
 <TCP_PORT>
 <16_BYTE_NONCE>
 ```
 
-The Windows relay reads this file, extracts the port and nonce, then:
+**Connection flow:**
 
-1. Listens on TCP `localhost:63331`
-2. On incoming connection: connects to `localhost:<TCP_PORT>` (to gpg-agent)
-3. Sends 16-byte nonce for authentication
-4. Pipes data bidirectionally (with immediate disconnection if either side closes)
+1. Bridge reads socket file (port + nonce)
+2. Bridge listens on TCP localhost:63331
+3. Remote connects to localhost:63331 (over VS Code tunnel)
+4. Bridge connects to localhost:TCP_PORT
+5. Bridge sends 16-byte nonce for authentication
+6. Data pipes bidirectionally
 
-### End-to-End Flow
+**Termination:** Immediate disconnect if either side closes (matches `npiperelay -ep -ei`)
+
+### Why This Architecture?
+
+**Previous approach (single multi-context extension):**
+
+- ❌ UI context doesn't activate when only remote folder is open
+- ❌ Bridge never starts automatically for remote-only workflows
+- ❌ Remote can't reliably connect to bridge
+
+**New approach (three separate extensions):**
+
+- ✅ Bridge always runs on Windows (just has `os: ["win32"]`)
+- ✅ Remote always runs on remotes (workspace context only)
+- ✅ Clear separation of concerns
+- ✅ Each extension has minimal, focused scope
+- ✅ Users install once via pack, both activate automatically
+
+## 📋 File Structure
 
 ```
-Remote Linux (WSL/Container/SSH)
-├─ /run/user/1000/gnupg/S.gpg-agent (Unix socket)
-│  ↓
-├─ Node.js Unix socket listener (src/remote/remoteRelay.ts)
-│  ↓
-├─ localhost:63331 (tunneled by VS Code)
-│  ↓
-Windows Host
-├─ Node.js TCP server (src/services/assuanBridge.ts)
-│  ├─ Reads: C:\Users\<user>\AppData\Roaming\gnupg\S.gpg-agent
-│  ├─ Extracts port + nonce
-│  ├─ Connects to localhost:<ASSUAN_PORT>
-│  ├─ Sends nonce authentication
-│  ↓
-├─ Gpg4win gpg-agent (Assuan socket on localhost:XXXX)
+.
+├── bridge/
+│   ├── src/
+│   │   ├── extension.ts           # Windows UI context
+│   │   └── services/
+│   │       └── assuanBridge.ts    # Assuan bridge service
+│   ├── package.json
+│   └── tsconfig.json
+├── remote/
+│   ├── src/
+│   │   ├── extension.ts           # Remote workspace context
+│   │   └── remoteRelay.ts         # Unified relay service
+│   ├── package.json
+│   └── tsconfig.json
+├── pack/
+│   └── package.json               # Extension pack manifest
+├── .gitignore
+├── README.md
+└── LICENSE
 ```
 
-### Implementation Details
+## 🛠️ Development
 
-#### Windows Side: Assuan Bridge
+### Build Individual Extensions
 
-**File:** `src/services/assuanBridge.ts`
+```powershell
+# Build bridge
+cd bridge
+npm install
+npm run compile
 
-- Reads Assuan socket file for port and nonce
-- Creates TCP server on `localhost:63331`
-- On connection: authenticates with nonce, pipes to gpg-agent
-- Immediate disconnection when either side closes (matches `npiperelay -ep -ei`)
+# Build remote
+cd ../remote
+npm install
+npm run compile
+```
 
-**Exposed via:** `gpg-windows-relay.getRelayPort()` command (returns 63331)
+### Watch Mode
 
-#### Remote Side: Relay Service
+```powershell
+cd bridge
+npm run watch
+```
 
-**File:** `src/remote/remoteRelay.ts`
+### Package for Distribution
 
-- Queries `gpgconf --list-dir agent-socket` for local socket path
-- Creates Unix socket listener at that path
-- Connects to Windows bridge via `localhost:63331` (tunneled by VS Code)
-- Pipes bidirectionally: Unix socket ↔ TCP connection
+```powershell
+cd bridge && npm run package
+cd ../remote && npm run package
+```
 
-**Identical code for all three remote types** (WSL, Dev Container, SSH) — no platform-specific logic needed.
+Produces `.vsix` files ready to install.
 
-#### Remote Extension Context
+### Debug
 
-**File:** `src/remote/extension.ts`
-
-- Activates automatically when extension installs in workspace context
-- Calls Windows extension to get relay port
-- Starts `remoteRelay` service
-- Handles lifecycle and error reporting
-
-#### Host Extension Context
-
-**File:** `src/extension.ts`
-
-- Activates on Windows host with UI context
-- Detects Gpg4win installation
-- Provides commands to start/stop Assuan bridge
-- Exposes `getRelayPort()` command for remote queries
-- Auto-start on activation if configured
+Press `F5` in each extension folder to launch debug host.
 
 ## 🧪 Testing
 
 ### Manual Testing
 
-1. **Start the bridge:**
-   - Press F5 to run Extension Development Host
-   - Click status bar → "Show Status"
-   - Run command "GPG Windows Relay: Start"
-   - Verify "Assuan bridge started on localhost:63331"
+1. **Install both extensions** (or the pack)
 
-2. **Connect to remote:**
-   - In the dev host VS Code window, connect to WSL/container/SSH
-   - Remote extension automatically activates
-   - Check remote terminal for relay status
+2. **Start the bridge:**
+   - Press F1 → "GPG Windows Relay: Start"
+   - Check output channel for "Bridge started on localhost:63331"
 
-3. **Test GPG:**
+3. **Connect to remote:**
+   - File → Add Folder to Workspace → WSL/Container/SSH folder
+   - Remote relay should auto-start
+   - Check remote output channel for relay status
+
+4. **Test GPG:**
 
    ```bash
    # In remote terminal
    gpg --list-keys
-   gpg --list-secret-keys
    # Should show your Windows GPG keys
    ```
 
-4. **Stop the bridge:**
-   - Run command "GPG Windows Relay: Stop"
+5. **Stop:**
+   - Press F1 → "GPG Windows Relay: Stop"
 
-### Debugging
+### Debug Output
 
-Enable debug output in `.vscode/launch.json`:
+Enable in VS Code settings:
 
 ```json
 {
-  "args": ["--user-data-dir", "${workspaceFolder}/.vscode-debug"]
+  "gpgWinRelay.debugLogging": true
 }
 ```
 
-Check VS Code output channels:
+Check output channels:
 
-- **GPG Windows Relay** (host side)
-- **GPG Windows Relay** (remote side - available in remote terminal)
-
-## 📋 File Structure
-
-```
-src/
-├── extension.ts                    # Host context (Windows) - manages Assuan bridge
-├── gpgRelay.ts                     # Old relay class (deprecated)
-├── test/
-│   └── extension.test.ts
-├── services/
-│   └── assuanBridge.ts             # Windows TCP bridge to gpg-agent
-├── remote/
-│   ├── extension.ts                # Remote context activation
-│   └── remoteRelay.ts              # Unified relay service (all remotes)
-```
-
-## 🛠️ Development
-
-Build and watch:
-
-```powershell
-npm install
-npm run watch
-```
-
-Run in debug mode:
-
-- Press `F5` in VS Code
-
-Package for distribution:
-
-```powershell
-npm run package
-```
-
-## 🔄 How Remotes Connect
-
-### VS Code Extension Multi-Context
-
-The extension runs in two contexts:
-
-1. **UI Context** (Windows host)
-
-   - `extensionKind: ["ui"]`
-   - Full access to host filesystem and commands
-   - Manages Assuan bridge
-
-2. **Workspace Context** (Remote: WSL/Container/SSH)
-
-   - `extensionKind: ["workspace"]`
-   - Runs automatically when connecting to remote
-   - Accesses local remote filesystem
-   - Communicates with UI context via `vscode.commands.executeCommand()`
-
-**Key Benefit:** No process spawning, no script deployment — VS Code handles everything natively.
+- **GPG Windows Relay** (bridge on Windows)
+- **GPG Windows Relay** (remote relay on remote)
 
 ## 📊 Status
 
-**Current implementation:**
+**Completed:**
 
-- ✅ Windows Assuan bridge service
-- ✅ Remote relay service (unified for all three types)
-- ✅ VS Code multi-context extension configured
-- ✅ Host extension context with bridge management
-- ✅ Remote extension context with auto-start
-- ✅ Package.json configured for multi-context
+- ✅ Bridge extension (Windows)
+- ✅ Remote extension (WSL/Container/SSH)
+- ✅ Extension pack configuration
+- ✅ Unified relay service (all remote types)
+- ✅ Configurable listen port
 
 **Supported remotes:**
 
 - ✅ WSL (Windows Subsystem for Linux)
 - ✅ Dev Containers
 - ✅ SSH Remotes
-- (All use identical relay code)
 
-## 📄 License
+**Known issues:**
 
-See LICENSE file.
+- None currently with three-extension approach
+
+## 🔄 Contributing
+
+For detailed architecture notes, see code comments in:
+
+- `bridge/src/services/assuanBridge.ts` - Assuan protocol details
+- `remote/src/remoteRelay.ts` - Relay implementation
