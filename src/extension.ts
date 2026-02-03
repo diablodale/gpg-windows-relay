@@ -59,14 +59,13 @@ async function startRelay() {
 	try {
 		const config = vscode.workspace.getConfiguration('gpgRelay');
 		const gpg4winPath = config.get<string>('gpg4winPath') || 'C:\\Program Files (x86)\\GnuPG\\bin';
-		const debugLogging = config.get<boolean>('debugLogging') || false;
+		let debugLogging = config.get<boolean>('debugLogging') || false;
+		debugLogging = true; // Force debug on for now
 
 		outputChannel.appendLine('🚀 Starting GPG agent relay...');
-
-		if (debugLogging) {
-			outputChannel.appendLine(`GPG4Win path: ${gpg4winPath}`);
-			outputChannel.appendLine(`Remote name: ${vscode.env.remoteName || 'none'}`);
-		}
+		outputChannel.appendLine(`GPG4Win path: ${gpg4winPath}`);
+		outputChannel.appendLine(`Remote name: ${vscode.env.remoteName || 'none'}`);
+		outputChannel.appendLine(`Debug logging: ${debugLogging}`);
 
 		// Create relay instance
 		relay = new GpgRelay({

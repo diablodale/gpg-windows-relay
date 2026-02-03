@@ -47,11 +47,16 @@ export class GpgRelay {
 
         // Verify gpg4win installation
         const gpgAgentPath = path.join(this.config.gpg4winPath, 'gpg-agent.exe');
+        this.log(`Checking for gpg-agent at: ${gpgAgentPath}`);
+        
         if (!fs.existsSync(gpgAgentPath)) {
             throw new Error(`GPG agent not found at: ${gpgAgentPath}`);
         }
+        
+        this.log('gpg-agent.exe found');
 
         // Find the Windows GPG agent socket/pipe
+        this.log('Looking for GPG agent named pipe...');
         const gpgAgentPipe = await this.findGpgAgentPipe();
         if (!gpgAgentPipe) {
             throw new Error('Could not find GPG agent named pipe. Is gpg-agent running?');
@@ -70,6 +75,7 @@ export class GpgRelay {
         // - WSL side: socat UNIX-LISTEN:/path/to/socket,fork EXEC:"npiperelay.exe -ep -s //./pipe/gpg-agent",nofork
         
         this.log('Relay setup complete (implementation pending)');
+        this.processes = []; // Mark as started even though actual relay isn't running yet
     }
 
     /**
