@@ -1,83 +1,95 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn } from 'child_process';
-import { GpgRelay } from './gpgRelay';
+import { spawnSync } from 'child_process';
+import { AssuanBridge } from './services/assuanBridge';
+import * as remoteExt from './remote/extension';
 
-// Relay state management
-let relay: GpgRelay | null = null;
+// Bridge state management
+let bridge: AssuanBridge | null = null;
 let outputChannel: vscode.OutputChannel;
 let statusBarItem: vscode.StatusBarItem;
 let detectedGpg4winPath: string | null = null;
-let detectedAgentPipe: string | null = null;
-let detectedNpipeRelay: string | null = null;
+let detectedAgentSocket: string | null = null;
 
 // This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel('GPG Windows Relay');
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 
-	outputChannel.appendLine('🔐 GPG Windows Relay extension activated');
+	// Determine which context we're running in based on platform
+	// https://code.visualstudio.com/api/advanced-topics/remote-extensions#varying-behaviors-when-running-remotely-or-in-the-codespaces-browser-editor
+	// UI context (Windows): process.platform === 'win32'
+	// Workspace context (remote): process.platform !== 'win32'
+	const isUIContext = process.platform === 'win32';
 
-	// Check if running on Windows
-	if (process.platform !== 'win32') {
-		vscode.window.showErrorMessage('GPG Windows Relay only works on Windows hosts');
-		return;
+	outputChannel.appendLine('🔐 GPG Windows Relay extension activated');
+	outputChannel.appendLine(`Context: ${isUIContext ? 'UI (Windows)' : 'Remote: ' + (vscode.env.remoteName || 'unknown')}`);
+
+	if (isUIContext) {
+		// UI Context (Windows) - run bridge management code
+		activateWindowsUI(context);
+	} else {
+		// Workspace Context (Remote) - run relay code
+		outputChannel.appendLine('📡 Running in workspace context, initializing remote relay...');
+		remoteExt.activate(context).catch((err) => {
+			outputChannel.appendLine(`❌ Error in remote activation: ${err instanceof Error ? err.message : String(err)}`);
+		});
 	}
+}
+
+function activateWindowsUI(context: vscode.ExtensionContext) {
 
 	// Register commands
 	context.subscriptions.push(
-		vscode.commands.registerCommand('gpg-windows-relay.start', startRelay),
-		vscode.commands.registerCommand('gpg-windows-relay.stop', stopRelay),
-		vscode.commands.registerCommand('gpg-windows-relay.restart', restartRelay),
+		vscode.commands.registerCommand('gpg-windows-relay.start', startBridge),
+		vscode.commands.registerCommand('gpg-windows-relay.stop', stopBridge),
+		vscode.commands.registerCommand('gpg-windows-relay.restart', restartBridge),
 		vscode.commands.registerCommand('gpg-windows-relay.showStatus', showStatus),
+		vscode.commands.registerCommand('gpg-windows-relay.getRelayPort', getRelayPort),
+		vscode.commands.registerCommand('gpg-windows-relay.ensureBridgeRunning', ensureBridgeRunning),
 		outputChannel,
 		statusBarItem
 	);
+
+	outputChannel.appendLine('✅ Local commands registered (start, stop, restart, showStatus, ensureBridgeRunning, getRelayPort)');
 
 	// Update status bar
 	updateStatusBar();
 	statusBarItem.show();
 
-	// Detect Gpg4win path and agent pipe on startup (async, will complete in background)
-	detectGpg4winPath().then(() => {
-		detectAgentPipe().then(() => {
-			detectNpipeRelay().catch(() => {
-				// Silently ignore if npiperelay detection fails
-			});
-		}).catch(() => {
-			// Silently ignore if pipe detection fails
-		});
-	}).catch(() => {
+	// Detect Gpg4win and agent socket on startup (async, will complete in background)
+	detectGpg4winPath().catch(() => {
 		// Silently ignore if gpg4win detection fails
 	});
 
-	// Check for remote connection and auto-start if configured
+	// Auto-start bridge by default on Windows (can be disabled with autoStart: false)
 	const config = vscode.workspace.getConfiguration('gpgWinRelay');
-	if (config.get('autoStart') && isRemoteSession()) {
-		outputChannel.appendLine('🔌 Remote session detected, auto-starting relay...');
-		startRelay();
+	if (config.get('autoStart', true)) {
+		outputChannel.appendLine('🚀 Auto-starting local bridge...');
+		startBridge().catch((error: unknown) => {
+			outputChannel.appendLine(`❌ Auto-start failed: ${error instanceof Error ? error.message : String(error)}`);
+		});
 	}
 }
 
-// Check if we're in a remote session
-function isRemoteSession(): boolean {
-	return !!vscode.env.remoteName; // remoteName is set when connected to WSL, SSH, containers, etc.
+// Get the configured listen port
+function getConfiguredListenPort(): number {
+	const config = vscode.workspace.getConfiguration('gpgWinRelay');
+	return config.get<number>('listenPort') || 63331;
 }
 
 // Detect Gpg4win installation path
 async function detectGpg4winPath(): Promise<void> {
 	const config = vscode.workspace.getConfiguration('gpgWinRelay');
-	const configPath = config.get<string>('gpgWinRelay.gpg4winPath') || '';
+	const configPath = config.get<string>('gpg4winPath') || '';
 
 	// Check configured path first
 	if (configPath) {
 		const gpgconfPath = path.join(configPath, 'gpgconf.exe');
 		if (fs.existsSync(gpgconfPath)) {
 			detectedGpg4winPath = configPath;
+			detectAgentSocket();
 			return;
 		}
 	}
@@ -92,6 +104,7 @@ async function detectGpg4winPath(): Promise<void> {
 		const gpgconfPath = path.join(checkPath, 'gpgconf.exe');
 		if (fs.existsSync(gpgconfPath)) {
 			detectedGpg4winPath = checkPath;
+			detectAgentSocket();
 			return;
 		}
 	}
@@ -106,15 +119,18 @@ async function detectGpg4winPath(): Promise<void> {
 		const gpgconfPath = path.join(checkPath, 'gpgconf.exe');
 		if (fs.existsSync(gpgconfPath)) {
 			detectedGpg4winPath = checkPath;
+			detectAgentSocket();
 			return;
 		}
 	}
+
+	outputChannel.appendLine('⚠️  Gpg4win not found. Please install Gpg4win or configure path.');
 }
 
-// Detect GPG agent pipe on startup
-async function detectAgentPipe(): Promise<void> {
+// Detect GPG agent socket path
+function detectAgentSocket(): void {
 	if (!detectedGpg4winPath) {
-		return; // Can't detect pipe without gpg4win
+		return;
 	}
 
 	const gpgconfPath = path.join(detectedGpg4winPath, 'gpgconf.exe');
@@ -123,190 +139,130 @@ async function detectAgentPipe(): Promise<void> {
 	}
 
 	try {
-		const pipe = await queryGpgAgentSocket(gpgconfPath);
-		if (pipe) {
-			detectedAgentPipe = pipe;
-		}
-	} catch (error) {
-		// Silently fail - pipe detection is non-critical
-	}
-}
-
-// Detect npiperelay on startup
-async function detectNpipeRelay(): Promise<void> {
-	try {
-		const npipeRelayPath = await checkNpipeRelayAvailability();
-		if (npipeRelayPath) {
-			detectedNpipeRelay = npipeRelayPath;
-		}
-	} catch (error) {
-		// Silently fail - npiperelay detection is non-critical
-	}
-}
-
-// Check if npiperelay is available
-function checkNpipeRelayAvailability(): Promise<string | null> {
-	return new Promise((resolve) => {
-		try {
-			const proc = spawn('npiperelay.exe', ['--help'], {
-				stdio: ['ignore', 'pipe', 'pipe'],
-				timeout: 1000,
-				shell: true
-			});
-
-			proc.on('exit', (code) => {
-				// Exit code 0 means success
-				if (code === 0) {
-					resolve('npiperelay.exe');
-				} else {
-					resolve(null);
-				}
-			});
-
-			proc.on('error', () => {
-				resolve(null);
-			});
-
-			// Timeout after 1 second
-			setTimeout(() => {
-				if (!proc.killed) {
-					proc.kill();
-				}
-				resolve(null);
-			}, 1000);
-		} catch (error) {
-			resolve(null);
-		}
-	});
-}
-
-// Query GPG agent socket using gpgconf
-function queryGpgAgentSocket(gpgconfPath: string): Promise<string | null> {
-	return new Promise((resolve) => {
-		try {
-			const proc = spawn(gpgconfPath, ['--list-dir', 'agent-socket'], {
-				stdio: ['ignore', 'pipe', 'pipe'],
-				timeout: 2000
-			});
-
-			let stdout = '';
-
-			proc.stdout?.on('data', (data: Buffer) => {
-				stdout += data.toString();
-			});
-
-			proc.on('exit', (code: number) => {
-				if (code === 0 && stdout) {
-					resolve(stdout.trim());
-				} else {
-					resolve(null);
-				}
-			});
-
-			proc.on('error', () => {
-				resolve(null);
-			});
-
-			// Timeout after 2 seconds
-			setTimeout(() => {
-				if (!proc.killed) {
-					proc.kill();
-				}
-				resolve(null);
-			}, 2000);
-		} catch (error) {
-			resolve(null);
-		}
-	});
-}
-
-// Start the GPG Windows Relay
-async function startRelay() {
-	if (relay?.isRunning()) {
-		vscode.window.showWarningMessage('GPG Windows Relay is already running');
-		return;
-	}
-
-	try {
-		const config = vscode.workspace.getConfiguration('gpgWinRelay');
-		const gpg4winPath = config.get<string>('gpg4winPath') || '';
-		const npiperelayPath = config.get<string>('npiperelayPath') || '';
-		const debugLogging = config.get<boolean>('debugLogging') || false;
-
-		outputChannel.appendLine('🚀 Starting GPG Windows Relay...');
-
-		if (debugLogging) {
-			outputChannel.appendLine(`Config Gpg4win path: ${gpg4winPath || '(auto-detect)'}`);
-			outputChannel.appendLine(`Config npiperelay path: ${npiperelayPath || '(auto-detect)'}`);
-			outputChannel.appendLine(`Remote name: ${vscode.env.remoteName || 'none'}`);
-		}
-
-		// Create relay instance
-		relay = new GpgRelay({
-			gpg4winPath,
-			npiperelayPath,
-			debugLogging,
-			remoteName: vscode.env.remoteName
+		const result = spawnSync(gpgconfPath, ['--list-dir', 'agent-socket'], {
+			encoding: 'utf8',
+			timeout: 2000
 		});
 
-		relay.setLogCallback((message) => outputChannel.appendLine(message));
-
-		await relay.start();
-
-		updateStatusBar(true);
-		vscode.window.showInformationMessage('GPG Windows Relay started');
+		if (result.status === 0 && result.stdout) {
+			detectedAgentSocket = result.stdout.trim();
+			outputChannel.appendLine(`✅ Detected local GPG agent socket: ${detectedAgentSocket}`);
+		}
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
-		outputChannel.appendLine(`❌ Error starting relay: ${errorMessage}`);
-		outputChannel.show(true); // Show the output panel
-		vscode.window.showErrorMessage(`Failed to start GPG Windows Relay: ${errorMessage}`);
-		relay = null;
+		// Silently fail
 	}
 }
 
-// Stop the GPG Windows Relay
-async function stopRelay() {
-	if (!relay?.isRunning()) {
-		vscode.window.showInformationMessage('GPG Windows Relay is not running');
+// Get relay port (called by remote extension via command)
+async function getRelayPort(): Promise<number> {
+	if (!bridge?.isRunning()) {
+		throw new Error('❌ Local bridge is not running');
+	}
+	return getConfiguredListenPort();
+}
+
+// Ensure bridge is running and return port (called by remote to start bridge if needed)
+async function ensureBridgeRunning(): Promise<number> {
+	if (!bridge?.isRunning()) {
+		outputChannel.appendLine('🔄 Remote requested local bridge start...');
+		await startBridge();
+	}
+
+	if (!bridge?.isRunning()) {
+		throw new Error('Failed to start local bridge');
+	}
+
+	return getConfiguredListenPort();
+}
+
+// Start the local bridge
+async function startBridge(): Promise<void> {
+	if (bridge?.isRunning()) {
+		vscode.window.showWarningMessage('Local bridge is already running');
 		return;
 	}
 
-	outputChannel.appendLine('🛑 Stopping GPG Windows Relay...');
+	try {
+		if (!detectedGpg4winPath || !detectedAgentSocket) {
+			// Try detecting again
+			await detectGpg4winPath();
+			if (!detectedAgentSocket) {
+				throw new Error('Gpg4win not found. Please install Gpg4win or configure path.');
+			}
+		}
 
-	relay.stop();
-	relay = null;
+		outputChannel.appendLine('🚀 Starting local bridge...');
+
+		const config = vscode.workspace.getConfiguration('gpgWinRelay');
+		const debugLogging = config.get<boolean>('debugLogging') || false;
+		const listenPort = getConfiguredListenPort();
+
+		bridge = new AssuanBridge({
+			gpgAgentSocketPath: detectedAgentSocket,
+			listenPort: listenPort,
+			debugLogging: debugLogging
+		});
+
+		bridge.setLogCallback((message: string) => outputChannel.appendLine(message));
+		outputChannel.appendLine(`🔌 Local GPG agent socket: ${detectedAgentSocket}`);
+		outputChannel.appendLine(`📌 Local Assuan TCP port: ${bridge.getAssuanPort()}`);
+		outputChannel.appendLine(`📡 Listen port for tunnel: ${listenPort}`);
+
+		outputChannel.appendLine('⏳ Awaiting local bridge start...');
+		await bridge.start();
+		outputChannel.appendLine('✅ Local bridge started successfully');
+
+		updateStatusBar(true);
+		vscode.window.showInformationMessage(`Local bridge started on localhost:${listenPort}`);
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		outputChannel.appendLine(`❌ Error starting local bridge: ${errorMessage}`);
+		outputChannel.show(true);
+		vscode.window.showErrorMessage(`Failed to start local bridge: ${errorMessage}`);
+		bridge = null;
+	}
+}
+
+// Stop the local bridge
+async function stopBridge(): Promise<void> {
+	if (!bridge?.isRunning()) {
+		vscode.window.showInformationMessage('Local bridge is not running');
+		return;
+	}
+
+	outputChannel.appendLine('🛑 Stopping local bridge...');
+
+	await bridge.stop();
+	bridge = null;
 
 	updateStatusBar(false);
-	vscode.window.showInformationMessage('GPG Windows Relay stopped');
+	outputChannel.appendLine('✅ Local bridge stopped');
+	vscode.window.showInformationMessage('Local bridge stopped');
 }
 
-// Restart the GPG Windows Relay
-async function restartRelay() {
-	await stopRelay();
-	setTimeout(() => startRelay(), 500);
+// Restart the local bridge
+async function restartBridge(): Promise<void> {
+	await stopBridge();
+	await new Promise((resolve) => setTimeout(resolve, 500));
+	await startBridge();
 }
 
-// Show relay status
-function showStatus() {
-	const isRunning = relay?.isRunning() || false;
-	const remoteName = vscode.env.remoteName || 'none';
+// Show bridge status
+function showStatus(): void {
+	const isRunning = bridge?.isRunning() || false;
+	const gpg4winPath = detectedGpg4winPath || '(not detected)';
+	const agentSocket = detectedAgentSocket || '(not detected)';
 	const config = vscode.workspace.getConfiguration('gpgWinRelay');
-	// Use relay's detected path if relay is running, otherwise use global detected path
-	const gpg4winPath = relay?.getGpg4winPath() || detectedGpg4winPath || '(not detected)';
-	const agentPipe = relay?.getAgentPipe() || detectedAgentPipe || '(not detected)';
-	const npipeRelayPath = relay?.getNpipeRelayPath() || detectedNpipeRelay || '(not detected)';
 
 	const status = [
-		`GPG Windows Relay Status`,
-		``,
-		`Relay Status: ${isRunning ? '✅ Running' : '🛑 Stopped'}`,
-		`Remote Session: ${remoteName}`,
+		'GPG Windows Relay Status',
+		'',
+		`Local bridge: ${isRunning ? '✅ Running' : '🛑 Stopped'}`,
 		`Auto-start: ${config.get('autoStart') ? 'Enabled' : 'Disabled'}`,
-		`Debug Logging: ${config.get('debugLogging') ? 'Enabled' : 'Disabled'}`,
-		``,
+		'',
 		`Gpg4win: ${gpg4winPath}`,
-		`gpg agent pipe: ${agentPipe}`,
-		`npiperelay: ${npipeRelayPath}`
+		`Local GPG agent socket: ${agentSocket}`,
+		`Listen port for tunnel: ${getConfiguredListenPort()}`
 	].join('\n');
 
 	vscode.window.showInformationMessage(status, { modal: true });
@@ -314,25 +270,27 @@ function showStatus() {
 }
 
 // Update the status bar item
-function updateStatusBar(running?: boolean) {
-	const isRunning = running ?? (relay?.isRunning() || false);
+function updateStatusBar(running?: boolean): void {
+	const isRunning = running ?? (bridge?.isRunning() || false);
 
 	if (isRunning) {
-		statusBarItem.text = '$(key) GPG Windows Relay: Active';
+		statusBarItem.text = '$(key) GPG Relay: Active';
 		statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
-		statusBarItem.tooltip = 'GPG Windows Relay is running';
+		statusBarItem.tooltip = 'Local bridge is running';
 	} else {
-		statusBarItem.text = '$(key) GPG Windows Relay: Inactive';
+		statusBarItem.text = '$(key) GPG Relay: Inactive';
 		statusBarItem.backgroundColor = undefined;
-		statusBarItem.tooltip = 'GPG Windows Relay is not running';
+		statusBarItem.tooltip = 'Local bridge is not running';
 	}
 
 	statusBarItem.command = 'gpg-windows-relay.showStatus';
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {
-	if (relay?.isRunning()) {
-		relay.stop();
+export function deactivate(): void {
+	if (bridge?.isRunning()) {
+		bridge.stop().catch(() => {
+			// Silently ignore cleanup errors
+		});
 	}
 }

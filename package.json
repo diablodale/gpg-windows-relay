@@ -4,6 +4,10 @@
   "description": "Relays remote GPG protocols to Windows host running Gpg4win",
   "version": "0.0.1",
   "publisher": "local",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/diablodale/gpg-windows-relay"
+  },
   "engines": {
     "vscode": "^1.108.1"
   },
@@ -11,15 +15,16 @@
     "Other"
   ],
   "extensionKind": [
-    "ui"
-  ],
-  "os": [
-    "win32"
+    "ui",
+    "workspace"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:gpg-windows-relay.start",
+    "onCommand:gpg-windows-relay.stop"
   ],
   "main": "./out/extension.js",
+  "browser": "./out/extension.js",
   "contributes": {
     "commands": [
       {
@@ -56,13 +61,20 @@
         },
         "gpgWinRelay.autoStart": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Automatically start relay when remote connection is detected"
         },
         "gpgWinRelay.debugLogging": {
           "type": "boolean",
           "default": false,
           "description": "Enable debug logging for troubleshooting"
+        },
+        "gpgWinRelay.listenPort": {
+          "type": "number",
+          "default": 63331,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "TCP port for the local bridge to listen on (must be >= 1024)"
         }
       }
     }
@@ -73,16 +85,18 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "package": "vsce package"
   },
   "devDependencies": {
-    "@types/vscode": "^1.108.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "typescript-eslint": "^8.52.0",
+    "@types/vscode": "^1.108.1",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.7.1",
     "eslint": "^9.39.2",
     "typescript": "^5.9.3",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "typescript-eslint": "^8.52.0"
   }
 }
