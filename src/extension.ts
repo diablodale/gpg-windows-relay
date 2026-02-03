@@ -230,18 +230,21 @@ async function startRelay() {
 	try {
 		const config = vscode.workspace.getConfiguration('gpgRelay');
 		const gpg4winPath = config.get<string>('gpg4winPath') || '';
+		const npiperelayPath = config.get<string>('npiperelayPath') || '';
 		const debugLogging = config.get<boolean>('debugLogging') || false;
 
 		outputChannel.appendLine('🚀 Starting GPG agent relay...');
 
 		if (debugLogging) {
-			outputChannel.appendLine(`Config GPG4Win path: ${gpg4winPath || '(auto-detect)'}`);
+			outputChannel.appendLine(`Config Gpg4win path: ${gpg4winPath || '(auto-detect)'}`);
+			outputChannel.appendLine(`Config npiperelay path: ${npiperelayPath || '(auto-detect)'}`);
 			outputChannel.appendLine(`Remote name: ${vscode.env.remoteName || 'none'}`);
 		}
 
 		// Create relay instance
 		relay = new GpgRelay({
 			gpg4winPath,
+			npiperelayPath,
 			debugLogging,
 			remoteName: vscode.env.remoteName
 		});
@@ -296,7 +299,7 @@ function showStatus() {
 	const status = [
 		`GPG Agent Relay Status`,
 		``,
-		`Relay Status: ${isRunning ? '✅ Running' : '⭕ Stopped'}`,
+		`Relay Status: ${isRunning ? '✅ Running' : '🛑 Stopped'}`,
 		`Remote Session: ${remoteName}`,
 		`Auto-start: ${config.get('autoStart') ? 'Enabled' : 'Disabled'}`,
 		`Debug Logging: ${config.get('debugLogging') ? 'Enabled' : 'Disabled'}`,

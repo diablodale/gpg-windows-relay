@@ -15,7 +15,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 
 export interface RelayConfig {
-    gpg4winPath: string;
+    gpg4winPath?: string;
+    npiperelayPath?: string;
     debugLogging: boolean;
     remoteName?: string;
 }
@@ -73,7 +74,7 @@ export class GpgRelay {
         this.log('Searching for Gpg4win installation...');
         const gpg4winPath = await this.findGpg4WinPath();
         if (!gpg4winPath) {
-            throw new Error('GPG4Win not found. Please install Gpg4win or configure gpgRelay.gpg4winPath');
+            throw new Error('Gpg4win not found. Please install Gpg4win or configure gpgRelay.gpg4winPath');
         }
         this.detectedGpg4winPath = gpg4winPath;        this.log(`Found Gpg4win at: ${gpg4winPath}`);
 
@@ -101,7 +102,7 @@ export class GpgRelay {
         this.log('Searching for npiperelay.exe...');
         const npipeRelayPath = await this.findNpipeRelay();
         if (!npipeRelayPath) {
-            throw new Error('npiperelay.exe not found. Please install npiperelay. See: https://github.com/jstarks/npiperelay');
+            throw new Error('npiperelay with Assuan support not found. Please install the albertony fork with "winget install albertony.npiperelay" or from https://github.com/albertony/npiperelay');
         }
 
         this.detectedNpipeRelay = npipeRelayPath;
@@ -146,15 +147,35 @@ export class GpgRelay {
 
     /**
      * Find npiperelay.exe installation
-     * Checks PATH, common install locations, and WSL interop
+     * Checks config path first, then PATH, common install locations
+     * IMPORTANT: Only the albertony fork (https://github.com/albertony/npiperelay) is supported
+     * because it includes Assuan socket support (-a flag) needed for gpg4win
      */
     private async findNpipeRelay(): Promise<string | null> {
-        // 1. Check if npiperelay is in PATH
+        // 1. Check if configured path is set
+        if (this.config.npiperelayPath) {
+            this.log(`Checking configured npiperelay path: ${this.config.npiperelayPath}`);
+            if (fs.existsSync(this.config.npiperelayPath)) {
+                const hasAssuan = await this.validateNpipeRelayAssuan(this.config.npiperelayPath);
+                if (hasAssuan) {
+                    this.log(`Configured npiperelay at ${this.config.npiperelayPath} has Assuan support`);
+                    return this.config.npiperelayPath;
+                } else {
+                    this.log(`Configured npiperelay at ${this.config.npiperelayPath} does not have Assuan support`);
+                }
+            } else {
+                this.log(`Configured npiperelay path does not exist: ${this.config.npiperelayPath}`);
+            }
+        }
+
+        // 2. Check if npiperelay is in PATH
         this.log('Checking PATH for npiperelay.exe...');
-        const inPath = await this.checkCommandInPath('npiperelay.exe', ['--help']);
-        if (inPath) {
-            this.log('Found npiperelay.exe in PATH');
+        const hasAssuan = await this.validateNpipeRelayAssuan('npiperelay.exe');
+        if (hasAssuan) {
+            this.log('Found npiperelay.exe in PATH with Assuan support');
             return 'npiperelay.exe';
+        } else {
+            this.log('npiperelay.exe in PATH does not have Assuan support (-a flag)');
         }
 
         // 2. Check common installation locations
@@ -169,51 +190,80 @@ export class GpgRelay {
         for (const location of npipeLocations) {
             this.log(`Checking: ${location}`);
             if (fs.existsSync(location)) {
-                this.log(`Found npiperelay at: ${location}`);
-                return location;
+                const hasAssuan = await this.validateNpipeRelayAssuan(location);
+                if (hasAssuan) {
+                    this.log(`Found npiperelay at: ${location} with Assuan support`);
+                    return location;
+                } else {
+                    this.log(`npiperelay at ${location} does not have Assuan support (-a flag)`);
+                }
             }
         }
 
         // 3. Try to run from current directory
         if (fs.existsSync('./npiperelay.exe')) {
-            this.log('Found npiperelay.exe in current directory');
-            return './npiperelay.exe';
+            const hasAssuan = await this.validateNpipeRelayAssuan('./npiperelay.exe');
+            if (hasAssuan) {
+                this.log('Found npiperelay.exe in current directory with Assuan support');
+                return './npiperelay.exe';
+            } else {
+                this.log('npiperelay.exe in current directory does not have Assuan support (-a flag)');
+            }
         }
 
-        this.log('npiperelay not found in any standard location');
+        this.log('npiperelay not found or does not have Assuan support');
         return null;
     }
 
     /**
-     * Check if a command exists in PATH
+     * Validate that npiperelay has Assuan support (albertony fork)
+     * Checks if --help output contains the "-a" flag for Assuan socket support
      */
-    private async checkCommandInPath(command: string, args: string[] = []): Promise<boolean> {
+    private async validateNpipeRelayAssuan(command: string): Promise<boolean> {
         return new Promise((resolve) => {
             try {
-                const proc = spawn(command, args, {
-                    stdio: 'ignore',
+                const proc = spawn(command, ['--help'], {
+                    stdio: ['ignore', 'pipe', 'pipe'],
                     timeout: 1000,
                     shell: true
                 });
 
-                proc.on('exit', (code) => {
-                    // Exit code 0 means command was successful
-                    resolve(code === 0);
+                let output = '';
+
+                proc.stdout?.on('data', (data) => {
+                    output += data.toString();
+                });
+
+                proc.stderr?.on('data', (data) => {
+                    output += data.toString();
+                });
+
+                proc.on('exit', () => {
+                    // Check if output contains "-a" flag (Assuan support)
+                    const hasAssuan = output.includes('-a') && output.includes('Assuan');
+                    resolve(hasAssuan);
                 });
 
                 proc.on('error', () => {
                     resolve(false);
                 });
 
-                setTimeout(() => resolve(false), 1000);
+                setTimeout(() => {
+                    if (!proc.killed) {
+                        proc.kill();
+                    }
+                    resolve(false);
+                }, 1000);
             } catch (error) {
                 resolve(false);
             }
         });
     }
 
+
+
     /**
-     * Find GPG4Win installation directory
+     * Find Gpg4win installation directory
      * Checks in order: config path, 64-bit default, 32-bit default
      */
     private async findGpg4WinPath(): Promise<string | null> {

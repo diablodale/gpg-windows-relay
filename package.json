@@ -45,7 +45,14 @@
         "gpgRelay.gpg4winPath": {
           "type": "string",
           "default": "",
-          "description": "Path to Gpg4win's GnuPG bin directory containing gpgconf.exe. Leave empty to auto-detect (checks Program Files 64-bit, then Program Files (x86))"
+          "markdownDescription": "Path to Gpg4win's GnuPG bin directory containing `gpgconf.exe`. Leave empty to auto-detect.",
+          "scope": "resource"
+        },
+        "gpgRelay.npiperelayPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to `npiperelay.exe` (albertony fork with Assuan support). Leave empty to auto-detect.",
+          "scope": "resource"
         },
         "gpgRelay.autoStart": {
           "type": "boolean",
