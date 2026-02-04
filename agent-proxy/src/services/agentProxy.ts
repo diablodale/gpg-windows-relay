@@ -45,14 +45,80 @@ export class AgentProxy {
 
     /**
      * Connect to GPG agent and return a sessionId
+     * On Windows, reads the socket file to extract port and nonce, then connects via TCP
+     * Waits for nonce to be sent before returning
      */
-    public connectAgent(): string {
+    public async connectAgent(): Promise<string> {
         const sessionId = uuidv4();
         this.log(`Creating session: ${sessionId}`);
 
         try {
-            const socket = net.createConnection(this.config.gpgAgentSocketPath);
+            // Read the socket file to get port and nonce (Windows Assuan format)
+            const socketData = fs.readFileSync(this.config.gpgAgentSocketPath);
 
+            // Parse: first line is port (ASCII), then raw 16-byte nonce
+            const newlineIndex = socketData.indexOf('\n');
+            if (newlineIndex === -1) {
+                throw new Error('Invalid socket file format: no newline found');
+            }
+
+            const portStr = socketData.toString('utf-8', 0, newlineIndex);
+            const port = parseInt(portStr, 10);
+
+            if (isNaN(port)) {
+                throw new Error(`Invalid port in socket file: ${portStr}`);
+            }
+
+            // Extract raw 16-byte nonce after the newline
+            const nonceStart = newlineIndex + 1;
+            const nonce = socketData.slice(nonceStart, nonceStart + 16);
+
+            if (nonce.length !== 16) {
+                throw new Error(`Invalid nonce length: expected 16 bytes, got ${nonce.length}`);
+            }
+
+            this.log(`Connecting to localhost:${port} with nonce`);
+
+            // Connect to localhost:port
+            const socket = net.createConnection({
+                host: 'localhost',
+                port: port
+            });
+
+            // Wait for connection and nonce to be sent
+            await new Promise<void>((resolve, reject) => {
+                const errorHandler = (error: Error) => {
+                    this.log(`Session ${sessionId} socket error: ${error.message}`);
+                    this.sessions.delete(sessionId);
+                    reject(error);
+                };
+
+                const closeHandler = () => {
+                    this.log(`Session ${sessionId} socket closed during connection`);
+                    this.sessions.delete(sessionId);
+                    reject(new Error('Socket closed before nonce was sent'));
+                };
+
+                const connectHandler = () => {
+                    // Remove temporary handlers and resolve
+                    socket.off('error', errorHandler);
+                    socket.off('close', closeHandler);
+                    this.log(`Session ${sessionId} connected, sending nonce`);
+                    socket.write(nonce);
+                    resolve();
+                };
+
+                socket.once('error', errorHandler);
+                socket.once('close', closeHandler);
+                socket.once('connect', connectHandler);
+            });
+
+            this.sessions.set(sessionId, {
+                socket: socket,
+                responseBuffer: ''
+            });
+
+            // Set up error/close handlers for after connection
             socket.on('error', (error) => {
                 this.log(`Session ${sessionId} socket error: ${error.message}`);
                 this.sessions.delete(sessionId);
@@ -61,11 +127,6 @@ export class AgentProxy {
             socket.on('close', () => {
                 this.log(`Session ${sessionId} socket closed`);
                 this.sessions.delete(sessionId);
-            });
-
-            this.sessions.set(sessionId, {
-                socket: socket,
-                responseBuffer: ''
             });
 
             this.log(`Session ${sessionId} connected successfully`);
@@ -182,21 +243,38 @@ export class AgentProxy {
     }
 
     /**
-     * Disconnect a session and clean up
+     * Gracefully disconnect a session by sending BYE command
+     * Waits for agent response before closing socket
      */
-    public disconnectAgent(sessionId: string): void {
+    public async disconnectAgent(sessionId: string): Promise<void> {
         const session = this.sessions.get(sessionId);
         if (!session) {
             throw new Error(`Invalid session: ${sessionId}`);
         }
 
-        this.log(`Closing session: ${sessionId}`);
-        session.socket.destroy();
-        this.sessions.delete(sessionId);
+        this.log(`Disconnecting session: ${sessionId}`);
+
+        try {
+            // Send BYE command and wait for response
+            await this.sendCommands(sessionId, 'BYE\n');
+            this.log(`Session ${sessionId} closed gracefully`);
+        } catch (error) {
+            // If BYE fails, log but continue with cleanup
+            const msg = error instanceof Error ? error.message : String(error);
+            this.log(`BYE failed for session ${sessionId}: ${msg}`);
+        } finally {
+            // Always destroy socket and cleanup
+            session.socket.destroy();
+            this.sessions.delete(sessionId);
+        }
     }
 
     public isRunning(): boolean {
         return this.sessions.size > 0;
+    }
+
+    public getSessionCount(): number {
+        return this.sessions.size;
     }
 }
 

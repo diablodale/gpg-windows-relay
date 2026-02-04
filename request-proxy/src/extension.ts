@@ -14,7 +14,7 @@ import { startRequestProxy } from './services/requestProxy';
 
 let requestProxyInstance: Awaited<ReturnType<typeof startRequestProxy>> | null = null;
 
-export async function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const outputChannel = vscode.window.createOutputChannel('GPG Request Proxy');
 
     try {
@@ -31,8 +31,8 @@ export async function activate(context: vscode.ExtensionContext) {
             outputChannel
         );
 
-        // Auto-start request proxy on remote
-        outputChannel.appendLine('Auto-starting request proxy...');
+        // Start request proxy on remote
+        outputChannel.appendLine('Starting request proxy...');
         try {
             await startRequestProxyHandler(outputChannel);
         } catch (err) {
@@ -46,7 +46,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 }
 
-async function startRequestProxyHandler(outputChannel: vscode.OutputChannel) {
+async function startRequestProxyHandler(outputChannel: vscode.OutputChannel): Promise<void> {
     if (requestProxyInstance) {
         outputChannel.appendLine('Request proxy already running');
         return;
@@ -72,7 +72,7 @@ async function startRequestProxyHandler(outputChannel: vscode.OutputChannel) {
     }
 }
 
-async function stopRequestProxyHandler(outputChannel: vscode.OutputChannel) {
+async function stopRequestProxyHandler(outputChannel: vscode.OutputChannel): Promise<void> {
     if (!requestProxyInstance) {
         outputChannel.appendLine('Request proxy is not running');
         return;

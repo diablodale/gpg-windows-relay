@@ -67,7 +67,7 @@ VS Code settings for "GPG Agent Proxy" having prefix `gpgAgentProxy`:
 
 **On Remote:**
 
-- **GPG Request Proxy: Start** - Start the request proxy (auto-starts by default)
+- **GPG Request Proxy: Start** - Start the request proxy
 - **GPG Request Proxy: Stop** - Stop the request proxy
 
 ### Typical Workflow
@@ -84,7 +84,7 @@ VS Code settings for "GPG Agent Proxy" having prefix `gpgAgentProxy`:
 
 This project uses a **monorepo structure** with three separate extensions:
 
-```
+```text
  .
  agent-proxy/       # Agent proxy
  request-proxy/     # Remote request proxy (WSL/Container/SSH)
@@ -132,7 +132,7 @@ This project uses a **monorepo structure** with three separate extensions:
 
 ### How It Works
 
-```
+```text
 Windows Host
  Gpg4win agent (Assuan socket on localhost)
   
@@ -193,7 +193,7 @@ Immediate disconnect if either side closes
 
 ## File Structure
 
-```
+```text
  .
  agent-proxy/
     src/

@@ -12,7 +12,7 @@ let detectedGpg4winPath: string | null = null;
 let detectedAgentSocket: string | null = null;
 
 // This method is called when your extension is activated
-export async function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	outputChannel = vscode.window.createOutputChannel('GPG Agent Proxy');
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 
@@ -40,13 +40,18 @@ export async function activate(context: vscode.ExtensionContext) {
 	statusBarItem.show();
 
 	// Detect Gpg4win and agent socket on startup
-	// Then auto-start agent proxy
-	outputChannel.appendLine('Auto-starting agent proxy...');
+	// Then start agent proxy
+	outputChannel.appendLine('Starting agent proxy...');
 	try {
 		await detectGpg4winPath();
 		await startAgentProxy();
+
+		// Run sanity probe after activation (fire-and-forget)
+		probeGpgAgent().catch((err) => {
+			outputChannel.appendLine(`Sanity probe warning: ${err instanceof Error ? err.message : String(err)}`);
+		});
 	} catch (error: unknown) {
-		outputChannel.appendLine(`Auto-start failed: ${error instanceof Error ? error.message : String(error)}`);
+		outputChannel.appendLine(`Start failed: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
@@ -66,7 +71,7 @@ async function connectAgent(): Promise<{ sessionId: string }> {
 	}
 
 	try {
-		const sessionId = agentProxyService.connectAgent();
+		const sessionId = await agentProxyService.connectAgent();
 		outputChannel.appendLine(`[connectAgent] Session created: ${sessionId}`);
 		return { sessionId };
 	} catch (error) {
@@ -111,7 +116,7 @@ async function disconnectAgent(sessionId: string): Promise<void> {
 	}
 
 	try {
-		agentProxyService.disconnectAgent(sessionId);
+		await agentProxyService.disconnectAgent(sessionId);
 		outputChannel.appendLine(`[disconnectAgent] Session closed: ${sessionId}`);
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
@@ -235,7 +240,6 @@ async function startAgentProxy(): Promise<void> {
 		outputChannel.appendLine('Agent proxy service initialized and ready.');
 
 		updateStatusBar(true);
-		vscode.window.showInformationMessage('Agent proxy started (ready to handle connections)');
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		outputChannel.appendLine(`Error starting agent proxy: ${errorMessage}`);
@@ -275,17 +279,22 @@ async function restartAgentProxy(): Promise<void> {
  * Show agent proxy status
  */
 function showStatus(): void {
-	const isRunning = agentProxyService !== null;
 	const gpg4winPath = detectedGpg4winPath || '(not detected)';
 	const agentSocket = detectedAgentSocket || '(not detected)';
+
+	let state = 'Inactive';
+	let sessionCount = 0;
+	if (agentProxyService) {
+		sessionCount = agentProxyService.getSessionCount();
+		state = sessionCount > 0 ? 'Active' : 'Ready';
+	}
 
 	const status = [
 		'GPG Agent Proxy Status',
 		'',
-		`Service: ${isRunning ? 'Running' : 'Stopped'}`,
-		'',
+		`State: ${state}${sessionCount > 0 ? ` (${sessionCount} session${sessionCount > 1 ? 's' : ''})` : ''}`,
 		`Gpg4win: ${gpg4winPath}`,
-		`GPG agent socket: ${agentSocket}`
+		`GPG agent: ${agentSocket}`
 	].join('\n');
 
 	vscode.window.showInformationMessage(status, { modal: true });
@@ -296,15 +305,39 @@ function showStatus(): void {
  * Update the status bar item
  */
 function updateStatusBar(running?: boolean): void {
-	const isRunning = running ?? (agentProxyService !== null);
+	let state = 'Inactive';
+	let tooltip = 'GPG agent proxy is not running';
 
-	if (isRunning) {
-		statusBarItem.text = '$(key) GPG Agent Proxy: Active';
-		statusBarItem.tooltip = 'GPG agent proxy is running and accepting connections';
-	} else {
-		statusBarItem.text = '$(key) GPG Agent Proxy: Inactive';
-		statusBarItem.tooltip = 'GPG agent proxy is not running';
+	if (agentProxyService) {
+		const sessionCount = agentProxyService.getSessionCount();
+		state = sessionCount > 0 ? 'Active' : 'Ready';
+		tooltip = sessionCount > 0
+			? `GPG agent proxy is active with ${sessionCount} session${sessionCount > 1 ? 's' : ''}`
+			: 'GPG agent proxy is ready for incoming requests';
 	}
 
+	statusBarItem.text = `$(key) GPG: ${state}`;
+	statusBarItem.tooltip = tooltip;
 	statusBarItem.command = 'gpg-agent-proxy.showStatus';
+}
+
+/**
+ * Sanity probe: Send GETINFO version to verify agent is responsive
+ * Runs async after activation, doesn't block startup
+ */
+async function probeGpgAgent(): Promise<void> {
+	if (!agentProxyService) {
+		return;
+	}
+
+	try {
+		const sessionId = await agentProxyService.connectAgent();
+		const result = await agentProxyService.sendCommands(sessionId, 'GETINFO version\n');
+		await agentProxyService.disconnectAgent(sessionId);
+
+		outputChannel.appendLine(`✓ GPG agent sanity probe passed: ${result.response.split('\n')[0]}`);
+	} catch (error: unknown) {
+		const msg = error instanceof Error ? error.message : String(error);
+		outputChannel.appendLine(`✗ GPG agent sanity probe failed: ${msg}`);
+	}
 }

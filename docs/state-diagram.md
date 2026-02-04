@@ -1,3 +1,5 @@
+# Sequence Diagram
+
 ```mermaid
 sequenceDiagram
     actor GPGClient
