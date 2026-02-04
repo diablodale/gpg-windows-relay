@@ -111,12 +111,18 @@ export class AgentProxy {
             const errorHandler = (error: Error) => {
                 session.socket.removeListener('data', dataHandler);
                 session.socket.removeListener('close', closeHandler);
+                this.log(`Session ${sessionId} socket error: ${error.message}`);
+                // Clean up session on error
+                this.sessions.delete(sessionId);
                 reject(new Error(`Socket error: ${error.message}`));
             };
 
             const closeHandler = () => {
                 session.socket.removeListener('data', dataHandler);
                 session.socket.removeListener('error', errorHandler);
+                this.log(`Session ${sessionId} socket closed unexpectedly`);
+                // Clean up session on close
+                this.sessions.delete(sessionId);
                 reject(new Error('Socket closed unexpectedly'));
             };
 
@@ -133,6 +139,9 @@ export class AgentProxy {
                 session.socket.removeListener('error', errorHandler);
                 session.socket.removeListener('close', closeHandler);
                 const msg = error instanceof Error ? error.message : String(error);
+                this.log(`Session ${sessionId} failed to write: ${msg}`);
+                // Clean up session on write failure
+                this.sessions.delete(sessionId);
                 reject(new Error(`Failed to write to socket: ${msg}`));
             }
         });

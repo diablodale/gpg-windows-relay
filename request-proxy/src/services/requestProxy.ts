@@ -49,16 +49,6 @@ export async function startRequestProxy(config: RequestProxyConfig): Promise<Req
 
     log(config, `Creating Unix socket server at: ${socketPath}`);
 
-    // Remove stale socket if it exists
-    if (fs.existsSync(socketPath)) {
-        try {
-            fs.unlinkSync(socketPath);
-            log(config, 'Removed stale socket file');
-        } catch (err) {
-            log(config, `Warning: could not remove stale socket: ${err}`);
-        }
-    }
-
     // Ensure parent directory exists
     const socketDir = path.dirname(socketPath);
     if (!fs.existsSync(socketDir)) {
@@ -146,7 +136,12 @@ async function connectToAgent(config: RequestProxyConfig, session: ClientSession
     } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         log(config, `Failed to connect to agent-proxy: ${msg}`);
-        session.socket.destroy();
+        // Close client socket immediately
+        try {
+            session.socket.destroy();
+        } catch (destroyErr) {
+            // Ignore
+        }
     }
 }
 
@@ -205,7 +200,13 @@ async function handleClientData(config: RequestProxyConfig, session: ClientSessi
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             log(config, `[${session.sessionId}] Error sending command: ${msg}`);
-            session.socket.destroy();
+            // Cleanup session (disconnects agent) before destroying socket
+            await cleanupSession(config, session);
+            try {
+                session.socket.destroy();
+            } catch (destroyErr) {
+                // Ignore
+            }
         }
     } else if (session.state === 'INQUIRE_DATA') {
         // Look for D lines followed by END
@@ -250,7 +251,13 @@ async function handleClientData(config: RequestProxyConfig, session: ClientSessi
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             log(config, `[${session.sessionId}] Error sending data block: ${msg}`);
-            session.socket.destroy();
+            // Cleanup session (disconnects agent) before destroying socket
+            await cleanupSession(config, session);
+            try {
+                session.socket.destroy();
+            } catch (destroyErr) {
+                // Ignore
+            }
         }
     }
 }
@@ -263,38 +270,59 @@ async function cleanupSession(config: RequestProxyConfig, session: ClientSession
         return;
     }
 
+    const sessionId = session.sessionId;
+
     try {
-        await vscode.commands.executeCommand('gpg-agent-proxy.disconnectAgent', session.sessionId);
-        log(config, `[${session.sessionId}] Session cleaned up`);
+        // Call disconnectAgent to clean up server-side session
+        await vscode.commands.executeCommand('gpg-agent-proxy.disconnectAgent', sessionId);
+        log(config, `[${sessionId}] Session cleaned up`);
     } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        log(config, `[${session.sessionId}] Error cleaning up: ${msg}`);
+        log(config, `[${sessionId}] Error cleaning up: ${msg}`);
+        // Continue even if cleanup fails - session will be cleaned on error handlers
     }
+
+    // Clear session reference
+    session.sessionId = null;
+    session.state = 'DISCONNECTED';
 }
 
 /**
  * Get the local GPG socket path by querying gpgconf
+ * Calls gpgconf twice to get agent-socket and agent-extra-socket separately,
+ * removes both if they exist, and returns the socket path to use.
  */
 async function getLocalGpgSocketPath(): Promise<string | null> {
     return new Promise((resolve) => {
         try {
-            const result = spawnSync('gpgconf', ['--list-dir', 'agent-extra-socket'], {
+            // Query each socket separately to avoid parsing issues with URL-encoded colons
+            const agentSocketResult = spawnSync('gpgconf', ['--list-dirs', 'agent-socket'], {
                 encoding: 'utf-8',
                 timeout: 5000
             });
 
-            if (result.error) {
-                resolve(null);
-                return;
+            const agentExtraSocketResult = spawnSync('gpgconf', ['--list-dirs', 'agent-extra-socket'], {
+                encoding: 'utf-8',
+                timeout: 5000
+            });
+
+            const agentSocketPath = agentSocketResult.status === 0 ? (agentSocketResult.stdout.trim() || null) : null;
+            const agentExtraSocketPath = agentExtraSocketResult.status === 0 ? (agentExtraSocketResult.stdout.trim() || null) : null;
+
+            // Remove both sockets if they exist
+            const socketsToRemove = [agentSocketPath, agentExtraSocketPath].filter((p) => p !== null);
+            for (const socketPath of socketsToRemove) {
+                if (fs.existsSync(socketPath)) {
+                    try {
+                        fs.unlinkSync(socketPath);
+                    } catch (err) {
+                        // Ignore - socket may be in use
+                    }
+                }
             }
 
-            if (result.status !== 0) {
-                resolve(null);
-                return;
-            }
-
-            const socketPath = result.stdout.trim();
-            resolve(socketPath || null);
+            // Return standard socket
+            resolve(agentSocketPath);
         } catch (err) {
             resolve(null);
         }

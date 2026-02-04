@@ -12,7 +12,7 @@ let detectedGpg4winPath: string | null = null;
 let detectedAgentSocket: string | null = null;
 
 // This method is called when your extension is activated
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel('GPG Agent Proxy');
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 
@@ -38,16 +38,15 @@ export function activate(context: vscode.ExtensionContext) {
 	updateStatusBar();
 	statusBarItem.show();
 
-	// Detect Gpg4win and agent socket on startup (async)
-	detectGpg4winPath().catch(() => {
-		// Silently ignore if gpg4win detection fails
-	});
-
-	// Auto-start agent proxy
+	// Detect Gpg4win and agent socket on startup
+	// Then auto-start agent proxy
 	outputChannel.appendLine('Auto-starting agent proxy...');
-	startAgentProxy().catch((error: unknown) => {
+	try {
+		await detectGpg4winPath();
+		await startAgentProxy();
+	} catch (error: unknown) {
 		outputChannel.appendLine(`Auto-start failed: ${error instanceof Error ? error.message : String(error)}`);
-	});
+	}
 }
 
 // ==============================================================================
@@ -188,7 +187,7 @@ function detectAgentSocket(): void {
 	}
 
 	try {
-		const result = spawnSync(gpgconfPath, ['--list-dir', 'agent-socket'], {
+		const result = spawnSync(gpgconfPath, ['--list-dir', 'agent-extra-socket'], {
 			encoding: 'utf8',
 			timeout: 2000
 		});
@@ -278,13 +277,11 @@ function showStatus(): void {
 	const isRunning = agentProxyService !== null;
 	const gpg4winPath = detectedGpg4winPath || '(not detected)';
 	const agentSocket = detectedAgentSocket || '(not detected)';
-	const config = vscode.workspace.getConfiguration('gpgAgentProxy');
 
 	const status = [
 		'GPG Agent Proxy Status',
 		'',
 		`Service: ${isRunning ? 'Running' : 'Stopped'}`,
-		`Auto-start: ${config.get('autoStart') ? 'Enabled' : 'Disabled'}`,
 		'',
 		`Gpg4win: ${gpg4winPath}`,
 		`GPG agent socket: ${agentSocket}`
