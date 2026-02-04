@@ -87,13 +87,21 @@ export class AgentProxy {
 
             // Wait for connection, send nonce, and read greeting
             await new Promise<void>((resolve, reject) => {
+                const connectionTimeout = setTimeout(() => {
+                    socket.destroy();
+                    this.sessions.delete(sessionId);
+                    reject(new Error('Connection timeout: greeting not received within 5 seconds'));
+                }, 5000);
+
                 const errorHandler = (error: Error) => {
+                    clearTimeout(connectionTimeout);
                     this.log(`Session ${sessionId} socket error: ${error.message}`);
                     this.sessions.delete(sessionId);
                     reject(error);
                 };
 
                 const closeHandler = () => {
+                    clearTimeout(connectionTimeout);
                     this.log(`Session ${sessionId} socket closed during initialization`);
                     this.sessions.delete(sessionId);
                     reject(new Error('Socket closed before initialization completed'));
@@ -105,6 +113,7 @@ export class AgentProxy {
                 };
 
                 const dataHandler = (chunk: Buffer) => {
+                    clearTimeout(connectionTimeout);
                     const greetingLine = chunk.toString('utf-8').trim();
                     this.log(`Session ${sessionId} received greeting: ${greetingLine}`);
 
@@ -152,7 +161,9 @@ export class AgentProxy {
             return sessionId;
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
-            throw new Error(`Failed to connect to GPG agent: ${msg}`);
+            const fullMsg = msg || 'Unknown error during connection';
+            this.log(`Session ${sessionId} connection failed: ${fullMsg}`);
+            throw new Error(`Failed to connect to GPG agent: ${fullMsg}`);
         }
     }
 

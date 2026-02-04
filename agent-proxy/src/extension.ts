@@ -41,7 +41,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 	// Detect Gpg4win and agent socket on startup
 	// Then start agent proxy
-	outputChannel.appendLine('Starting agent proxy...');
 	try {
 		await detectGpg4winPath();
 		await startAgentProxy();
@@ -237,7 +236,6 @@ async function startAgentProxy(): Promise<void> {
 		});
 
 		agentProxyService.setLogCallback((message: string) => outputChannel.appendLine(message));
-		outputChannel.appendLine(`GPG agent socket: ${detectedAgentSocket}`);
 		outputChannel.appendLine('Agent proxy service initialized and ready.');
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
@@ -304,18 +302,21 @@ function showStatus(): void {
  * Update the status bar item
  */
 function updateStatusBar(running?: boolean): void {
-	let state = 'Inactive';
+	let icon = '$(circle-slash)';
 	let tooltip = 'GPG agent proxy is not running';
 
 	if (agentProxyService) {
 		const sessionCount = agentProxyService.getSessionCount();
-		state = sessionCount > 0 ? 'Active' : 'Ready';
-		tooltip = sessionCount > 0
-			? `GPG agent proxy is active with ${sessionCount} session${sessionCount > 1 ? 's' : ''}`
-			: 'GPG agent proxy is ready for incoming requests';
+		if (sessionCount > 0) {
+			icon = '$(sync~spin)';
+			tooltip = `GPG agent proxy is active with ${sessionCount} session${sessionCount > 1 ? 's' : ''}`;
+		} else {
+			icon = '$(check)';
+			tooltip = 'GPG agent proxy is ready for incoming requests';
+		}
 	}
 
-	statusBarItem.text = `GPG: ${state}`;
+	statusBarItem.text = `GPG ${icon}`;
 	statusBarItem.tooltip = tooltip;
 	statusBarItem.command = 'gpg-agent-proxy.showStatus';
 }
@@ -335,11 +336,11 @@ async function probeGpgAgent(): Promise<void> {
 		const result = await agentProxyService.sendCommands(sessionId, 'GETINFO version\n');
 		await agentProxyService.disconnectAgent(sessionId);
 
-		outputChannel.appendLine(`✓ GPG agent sanity probe passed: ${result.response.split('\n')[0]}`);
+		outputChannel.appendLine(`GPG agent sanity probe passed: ${result.response.split('\n')[0]}`);
 		// Update status bar to Ready after successful probe
 		updateStatusBar();
 	} catch (error: unknown) {
 		const msg = error instanceof Error ? error.message : String(error);
-		outputChannel.appendLine(`✗ GPG agent sanity probe failed: ${msg}`);
+		outputChannel.appendLine(`GPG agent sanity probe failed: ${msg}`);
 	}
 }
