@@ -214,13 +214,13 @@ function detectAgentSocket(): void {
  */
 async function startAgentProxy(): Promise<void> {
 	if (agentProxyService) {
-		vscode.window.showWarningMessage('Agent proxy is already running');
+		vscode.window.showWarningMessage('Agent proxy already running');
 		return;
 	}
 
 	try {
+		// Ensure Gpg4win and agent socket are detected
 		if (!detectedGpg4winPath || !detectedAgentSocket) {
-			// Try detecting again
 			await detectGpg4winPath();
 			if (!detectedAgentSocket) {
 				throw new Error('Gpg4win not found. Please install Gpg4win or configure path.');
@@ -229,16 +229,17 @@ async function startAgentProxy(): Promise<void> {
 
 		outputChannel.appendLine('Starting agent proxy...');
 
+		// Create a log callback that respects the debugLogging setting
 		const config = vscode.workspace.getConfiguration('gpgAgentProxy');
 		const debugLogging = config.get<boolean>('debugLogging') || true;	// TODO remove forced debug logging
+		const logCallback = debugLogging ? (message: string) => outputChannel.appendLine(message) : undefined;
 
 		agentProxyService = new AgentProxy({
 			gpgAgentSocketPath: detectedAgentSocket,
-			debugLogging: debugLogging
+			logCallback: logCallback
 		});
 
-		agentProxyService.setLogCallback((message: string) => outputChannel.appendLine(message));
-		outputChannel.appendLine('Agent proxy service initialized and ready.');
+		outputChannel.appendLine('Agent proxy service initialized. Probe of gpg-agent in process. Status will be READY when complete.');
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		outputChannel.appendLine(`Error starting agent proxy: ${errorMessage}`);

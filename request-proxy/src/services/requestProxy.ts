@@ -389,4 +389,3 @@ function log(config: RequestProxyConfig, message: string): void {
         config.logCallback(message);
     }
 }
-

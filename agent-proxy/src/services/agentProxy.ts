@@ -14,7 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export interface AgentProxyConfig {
     gpgAgentSocketPath: string; // Path to Assuan socket file
-    debugLogging: boolean;
+    logCallback?: (message: string) => void;
 }
 
 interface SessionSocket {
@@ -24,22 +24,11 @@ interface SessionSocket {
 
 export class AgentProxy {
     private sessions: Map<string, SessionSocket> = new Map();
-    private logCallback?: (message: string) => void;
 
     constructor(private config: AgentProxyConfig) {
         // Validate socket path exists
         if (!fs.existsSync(config.gpgAgentSocketPath)) {
             throw new Error(`GPG agent socket not found: ${config.gpgAgentSocketPath}`);
-        }
-    }
-
-    public setLogCallback(callback: (message: string) => void): void {
-        this.logCallback = callback;
-    }
-
-    private log(message: string): void {
-        if (this.config.debugLogging && this.logCallback) {
-            this.logCallback(message);
         }
     }
 
@@ -49,12 +38,12 @@ export class AgentProxy {
      */
     private setupPersistentHandlers(sessionId: string, socket: net.Socket): void {
         socket.on('error', (error) => {
-            this.log(`Session ${sessionId} socket error: ${error.message}`);
+            log(this.config, `[${sessionId}] Socket error: ${error.message}`);
             this.sessions.delete(sessionId);
         });
 
         socket.on('close', () => {
-            this.log(`Session ${sessionId} socket closed`);
+            log(this.config, `[${sessionId}] Socket closed`);
             this.sessions.delete(sessionId);
         });
     }
@@ -66,7 +55,7 @@ export class AgentProxy {
      */
     public async connectAgent(): Promise<{ sessionId: string; greeting: string }> {
         const sessionId = uuidv4();
-        this.log(`Creating session: ${sessionId}`);
+        log(this.config, `[${sessionId}] Create session to gpg-agent...`);
 
         try {
             // Read the socket file to get port and nonce (Windows Assuan format)
@@ -93,7 +82,7 @@ export class AgentProxy {
                 throw new Error(`Invalid nonce length: expected 16 bytes, got ${nonce.length}`);
             }
 
-            this.log(`Connecting to localhost:${port} with nonce`);
+            log(this.config, `[${sessionId}] Found config suggesting gpg-agent at localhost:${port} and expects nonce`);
 
             let socket!: net.Socket;
 
@@ -105,7 +94,7 @@ export class AgentProxy {
                 };
 
                 const connectHandler = () => {
-                    this.log(`Session ${sessionId} connected, sending nonce`);
+                    log(this.config, `[${sessionId}] Connected to localhost:${port}, sending nonce...`);
                     try {
                         socket.write(nonce, (error) => {
                             clearTimeout(connectionTimeout);
@@ -153,21 +142,21 @@ export class AgentProxy {
                     throw new Error(`Invalid greeting from agent: ${greetingLine}`);
                 }
 
-                this.log(`Session ${sessionId} received greeting: ${greetingLine}`);
+                log(this.config, `[${sessionId}] Received greeting from gpg-agent: ${greetingLine}`);
             } catch (error) {
                 socket.destroy();
                 this.sessions.delete(sessionId);
                 throw error;
             }
 
-            this.log(`Session ${sessionId} connected successfully`);
+            log(this.config, `[${sessionId}] Connected successfully to gpg-agent`);
             return { sessionId, greeting };
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             const fullMsg = msg || 'Unknown error during connection';
-            this.log(`Session ${sessionId} connection failed: ${fullMsg}`);
+            log(this.config, `[${sessionId}] Connection to gpg-agent failed: ${fullMsg}`);
             this.sessions.delete(sessionId);
-            throw new Error(`Failed to connect to GPG agent: ${fullMsg}`);
+            throw new Error(`Connection to gpg-agent failed: ${fullMsg}`);
         }
     }
 
@@ -203,7 +192,7 @@ export class AgentProxy {
                 // Use latin1 to preserve raw bytes without UTF-8 mangling
                 const chunkStr = chunk.toString('latin1');
                 responseData += chunkStr;
-                this.log(`Session ${sessionId} data chunk: ${chunkStr.replace(/\n/g, '\\n')}`);
+                log(this.config, `[${sessionId}] Received ${chunk.length} bytes from gpg-agent: ${chunkStr.replace(/\n/g, '\\n')}`);   // TODO make output safe ascii in log window
 
                 // Check if we have a complete response
                 if (this.isCompleteResponse(responseData, isInquireBlock)) {
@@ -211,10 +200,8 @@ export class AgentProxy {
                     session.socket.removeListener('data', dataHandler);
                     session.socket.removeListener('close', closeHandler);
                     session.socket.removeListener('error', errorHandler);
-                    this.log(`Session ${sessionId} response complete: ${responseData.replace(/\n/g, '\\n')}`);
+                    log(this.config, `[${sessionId}] Received complete response from gpg-agent: ${responseData.replace(/\n/g, '\\n')}`);     // TODO make output safe ascii in log window
                     resolve(responseData);
-                } else {
-                    this.log(`Session ${sessionId} waiting for more data... (buffer: ${responseData.replace(/\n/g, '\\n')})`);
                 }
             };
 
@@ -250,15 +237,15 @@ export class AgentProxy {
             return Promise.reject(new Error(`Invalid session: ${sessionId}`));
         }
 
-        this.log(`Session ${sessionId} sending: ${commandBlock.replace(/\n/g, '\\n')}`);
+        log(this.config, `[${sessionId}] Send to gpg-agent: ${commandBlock.replace(/\n/g, '\\n')}`);
 
         try {
             session.socket.write(commandBlock);
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
-            this.log(`Session ${sessionId} failed to write: ${msg}`);
+            log(this.config, `[${sessionId}] Send to gpg-agent failed: ${msg}`);
             this.sessions.delete(sessionId);
-            throw new Error(`Failed to write to socket: ${msg}`);
+            throw new Error(`Send to gpg-agent failed: ${msg}`);
         }
 
         const isInquireBlock = commandBlock.startsWith('D ');
@@ -315,16 +302,17 @@ export class AgentProxy {
             throw new Error(`Invalid session: ${sessionId}`);
         }
 
-        this.log(`Disconnecting session: ${sessionId}`);
+        log(this.config, `[${sessionId}] Disconnect gracefully from gpg-agent...`);
 
         try {
             // Send BYE command and wait for response
             await this.sendCommands(sessionId, 'BYE\n');
-            this.log(`Session ${sessionId} closed gracefully`);
+            log(this.config, `[${sessionId}] Disconnected from gpg-agent`);
         } catch (error) {
             // If BYE fails, log but continue with cleanup
             const msg = error instanceof Error ? error.message : String(error);
-            this.log(`BYE failed for session ${sessionId}: ${msg}`);
+            log(this.config, `[${sessionId}] Disconnect gracefully failed: ${msg}`);
+            log(this.config, `[${sessionId}] Destroying session and force closing socket to gpg-agent`);
         } finally {
             // Always destroy socket and cleanup
             session.socket.destroy();
@@ -341,3 +329,11 @@ export class AgentProxy {
     }
 }
 
+/**
+ * Log helper
+ */
+function log(config: AgentProxyConfig, message: string): void {
+    if (config.logCallback) {
+        config.logCallback(message);
+    }
+}

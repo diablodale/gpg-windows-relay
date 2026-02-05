@@ -54,20 +54,24 @@ async function startRequestProxyHandler(outputChannel: vscode.OutputChannel): Pr
 
     try {
         outputChannel.appendLine('Starting request proxy...');
-        outputChannel.appendLine('Creating Unix socket server and state machine');
+
+        // Create a log callback that respects the debugLogging setting
+		const config = vscode.workspace.getConfiguration('gpgAgentProxy');
+		const debugLogging = config.get<boolean>('debugLogging') || true;	// TODO remove forced debug logging
+		const logCallback = debugLogging ? (message: string) => outputChannel.appendLine(message) : undefined;
 
         // Start the request proxy (implements state machine via VS Code commands)
+        outputChannel.appendLine('Creating Unix socket server and state machine');
         requestProxyInstance = await startRequestProxy({
-            logCallback: (msg) => outputChannel.appendLine(`  ${msg}`)
+            logCallback: logCallback
         });
 
         outputChannel.appendLine('Request proxy started successfully');
-        outputChannel.appendLine('Ready to handle GPG Assuan protocol operations');
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         outputChannel.appendLine(`Failed to start request proxy: ${message}`);
-        outputChannel.appendLine('Ensure gpg-agent is running and agent-proxy extension is started');
         outputChannel.show(true);
+        vscode.window.showErrorMessage(`Failed to start request proxy: ${message}`);
         throw error;
     }
 }
