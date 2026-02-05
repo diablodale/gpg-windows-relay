@@ -44,6 +44,22 @@ export class AgentProxy {
     }
 
     /**
+     * Set up persistent error/close handlers for a session
+     * These handlers log and clean up the session if the socket fails outside of active operations
+     */
+    private setupPersistentHandlers(sessionId: string, socket: net.Socket): void {
+        socket.on('error', (error) => {
+            this.log(`Session ${sessionId} socket error: ${error.message}`);
+            this.sessions.delete(sessionId);
+        });
+
+        socket.on('close', () => {
+            this.log(`Session ${sessionId} socket closed`);
+            this.sessions.delete(sessionId);
+        });
+    }
+
+    /**
      * Connect to GPG agent and return a sessionId and greeting
      * On Windows, reads the socket file to extract port and nonce, then connects via TCP
      * Waits for nonce to be sent and greeting to be received before returning
@@ -71,7 +87,7 @@ export class AgentProxy {
 
             // Extract raw 16-byte nonce after the newline
             const nonceStart = newlineIndex + 1;
-            const nonce = socketData.slice(nonceStart, nonceStart + 16);
+            const nonce = socketData.subarray(nonceStart, nonceStart + 16);
 
             if (nonce.length !== 16) {
                 throw new Error(`Invalid nonce length: expected 16 bytes, got ${nonce.length}`);
@@ -79,96 +95,70 @@ export class AgentProxy {
 
             this.log(`Connecting to localhost:${port} with nonce`);
 
-            // Connect to localhost:port
-            const socket = net.createConnection({
-                host: 'localhost',
-                port: port
-            });
+            let socket!: net.Socket;
 
-            // Wait for connection, send nonce, and read greeting
-            const greeting = await new Promise<string>((resolve, reject) => {
+            // Wait for connection and send nonce
+            await new Promise<void>((resolve, reject) => {
                 const rejectWith = (error: unknown, fallbackMessage: string) => {
                     const msg = error instanceof Error ? error.message : String(error || '');
                     reject(new Error(msg || fallbackMessage));
-                };
-
-                const connectionTimeout = setTimeout(() => {
-                    socket.destroy();
-                    this.sessions.delete(sessionId);
-                    rejectWith(undefined, 'Connection timeout: greeting not received within 5 seconds');
-                }, 5000);
-
-                const errorHandler = (error: Error) => {
-                    clearTimeout(connectionTimeout);
-                    this.log(`Session ${sessionId} socket error: ${error.message}`);
-                    this.sessions.delete(sessionId);
-                    rejectWith(error, 'Socket error during initialization');
-                };
-
-                const closeHandler = () => {
-                    clearTimeout(connectionTimeout);
-                    this.log(`Session ${sessionId} socket closed during initialization`);
-                    this.sessions.delete(sessionId);
-                    rejectWith(undefined, 'Socket closed before initialization completed');
                 };
 
                 const connectHandler = () => {
                     this.log(`Session ${sessionId} connected, sending nonce`);
                     try {
                         socket.write(nonce, (error) => {
+                            clearTimeout(connectionTimeout);
                             if (error) {
                                 rejectWith(error, 'Failed to send nonce');
+                            } else {
+                                resolve();
                             }
                         });
                     } catch (error) {
+                        clearTimeout(connectionTimeout);
                         rejectWith(error, 'Failed to send nonce');
                     }
                 };
 
-                const dataHandler = (chunk: Buffer) => {
-                    clearTimeout(connectionTimeout);
-                    const greetingLine = chunk.toString('utf-8').trim();
-                    this.log(`Session ${sessionId} received greeting: ${greetingLine}`);
+                const connectionTimeout = setTimeout(() => {
+                    socket.destroy();
+                    rejectWith(undefined, 'Connection timeout: nonce not sent within 5 seconds');
+                }, 5000);
 
-                    // Verify greeting starts with OK
-                    if (!greetingLine.startsWith('OK ')) {
-                        socket.off('error', errorHandler);
-                        socket.off('close', closeHandler);
-                        socket.off('data', dataHandler);
-                        socket.destroy();
-                        this.sessions.delete(sessionId);
-                        rejectWith(undefined, `Invalid greeting from agent: ${greetingLine}`);
-                        return;
-                    }
+                // Pass connectHandler as callback to createConnection - no race condition
+                socket = net.createConnection({
+                    host: 'localhost',
+                    port: port
+                }, connectHandler);
 
-                    // Greeting received successfully, prepare for commands
-                    socket.off('error', errorHandler);
-                    socket.off('close', closeHandler);
-                    socket.off('data', dataHandler);
-                    resolve(greetingLine + '\n');
-                };
-
-                socket.once('error', errorHandler);
-                socket.once('close', closeHandler);
-                socket.once('connect', connectHandler);
-                socket.once('data', dataHandler);
+                // Set persistent handlers and add to sessions map
+                this.setupPersistentHandlers(sessionId, socket);
+                this.sessions.set(sessionId, {
+                    socket: socket,
+                    responseBuffer: ''
+                });
             });
 
-            this.sessions.set(sessionId, {
-                socket: socket,
-                responseBuffer: ''
-            });
+            // Wait for greeting with timeout, then verify it
+            let greeting: string;
+            try {
+                greeting = await this.waitForResponse(sessionId, false, 5000);
+                const greetingLine = greeting.trim();
 
-            // Set up error/close handlers for after connection
-            socket.on('error', (error) => {
-                this.log(`Session ${sessionId} socket error: ${error.message}`);
+                // Verify greeting starts with OK
+                if (!greetingLine.startsWith('OK ')) {
+                    socket.destroy();
+                    this.sessions.delete(sessionId);
+                    throw new Error(`Invalid greeting from agent: ${greetingLine}`);
+                }
+
+                this.log(`Session ${sessionId} received greeting: ${greetingLine}`);
+            } catch (error) {
+                socket.destroy();
                 this.sessions.delete(sessionId);
-            });
-
-            socket.on('close', () => {
-                this.log(`Session ${sessionId} socket closed`);
-                this.sessions.delete(sessionId);
-            });
+                throw error;
+            }
 
             this.log(`Session ${sessionId} connected successfully`);
             return { sessionId, greeting };
@@ -176,27 +166,38 @@ export class AgentProxy {
             const msg = error instanceof Error ? error.message : String(error);
             const fullMsg = msg || 'Unknown error during connection';
             this.log(`Session ${sessionId} connection failed: ${fullMsg}`);
+            this.sessions.delete(sessionId);
             throw new Error(`Failed to connect to GPG agent: ${fullMsg}`);
         }
     }
 
     /**
-     * Send command block to GPG agent and return response
-     *
-     * Command block is a complete request (e.g., "GETINFO version\n" or "D data\nEND\n")
-     * Response is all lines returned by agent until complete (buffered internally)
+     * Shared handler to wait for complete response from socket
+     * Accumulates data chunks and detects completion using isCompleteResponse
+     * Used by both connectAgent (greeting) and sendCommands (command responses)
      */
-    public sendCommands(sessionId: string, commandBlock: string): Promise<{ response: string }> {
+    private waitForResponse(
+        sessionId: string,
+        isInquireBlock: boolean,
+        timeoutMs?: number
+    ): Promise<string> {
         const session = this.sessions.get(sessionId);
         if (!session) {
             return Promise.reject(new Error(`Invalid session: ${sessionId}`));
         }
 
-        this.log(`Session ${sessionId} sending: ${commandBlock.replace(/\n/g, '\\n')}`);
-
         return new Promise((resolve, reject) => {
             let responseData = '';
-            const isInquireBlock = commandBlock.startsWith('D ');
+            let timeoutHandle: NodeJS.Timeout | undefined;
+
+            if (timeoutMs) {
+                timeoutHandle = setTimeout(() => {
+                    session.socket.removeListener('data', dataHandler);
+                    session.socket.removeListener('close', closeHandler);
+                    session.socket.removeListener('error', errorHandler);
+                    reject(new Error(`Response timeout after ${timeoutMs}ms`));
+                }, timeoutMs);
+            }
 
             const dataHandler = (chunk: Buffer) => {
                 // Use latin1 to preserve raw bytes without UTF-8 mangling
@@ -206,54 +207,63 @@ export class AgentProxy {
 
                 // Check if we have a complete response
                 if (this.isCompleteResponse(responseData, isInquireBlock)) {
+                    if (timeoutHandle) clearTimeout(timeoutHandle);
                     session.socket.removeListener('data', dataHandler);
-                    session.socket.removeListener('error', errorHandler);
                     session.socket.removeListener('close', closeHandler);
-
+                    session.socket.removeListener('error', errorHandler);
                     this.log(`Session ${sessionId} response complete: ${responseData.replace(/\n/g, '\\n')}`);
-                    resolve({ response: responseData });
+                    resolve(responseData);
                 } else {
                     this.log(`Session ${sessionId} waiting for more data... (buffer: ${responseData.replace(/\n/g, '\\n')})`);
                 }
             };
 
-            const errorHandler = (error: Error) => {
-                session.socket.removeListener('data', dataHandler);
-                session.socket.removeListener('close', closeHandler);
-                this.log(`Session ${sessionId} socket error: ${error.message}`);
-                // Clean up session on error
-                this.sessions.delete(sessionId);
-                reject(new Error(`Socket error: ${error.message}`));
-            };
-
             const closeHandler = () => {
+                if (timeoutHandle) clearTimeout(timeoutHandle);
                 session.socket.removeListener('data', dataHandler);
                 session.socket.removeListener('error', errorHandler);
-                this.log(`Session ${sessionId} socket closed unexpectedly`);
-                // Clean up session on close
-                this.sessions.delete(sessionId);
                 reject(new Error('Socket closed unexpectedly'));
             };
 
-            // Set up listeners
-            session.socket.on('data', dataHandler);
-            session.socket.once('error', errorHandler);
-            session.socket.once('close', closeHandler);
-
-            // Send the command block
-            try {
-                session.socket.write(commandBlock);
-            } catch (error) {
+            const errorHandler = (error: Error) => {
+                if (timeoutHandle) clearTimeout(timeoutHandle);
                 session.socket.removeListener('data', dataHandler);
-                session.socket.removeListener('error', errorHandler);
                 session.socket.removeListener('close', closeHandler);
-                const msg = error instanceof Error ? error.message : String(error);
-                this.log(`Session ${sessionId} failed to write: ${msg}`);
-                // Clean up session on write failure
-                this.sessions.delete(sessionId);
-                reject(new Error(`Failed to write to socket: ${msg}`));
-            }
+                reject(new Error(`Socket error: ${error.message}`));
+            };
+
+            session.socket.on('data', dataHandler);
+            session.socket.once('close', closeHandler);
+            session.socket.once('error', errorHandler);
         });
+    }
+
+    /**
+     * Send command block to GPG agent and return response
+     *
+     * Command block is a complete request (e.g., "GETINFO version\n" or "D data\nEND\n")
+     * Response is all lines returned by agent until complete (buffered internally)
+     */
+    public async sendCommands(sessionId: string, commandBlock: string): Promise<{ response: string }> {
+        const session = this.sessions.get(sessionId);
+        if (!session) {
+            return Promise.reject(new Error(`Invalid session: ${sessionId}`));
+        }
+
+        this.log(`Session ${sessionId} sending: ${commandBlock.replace(/\n/g, '\\n')}`);
+
+        try {
+            session.socket.write(commandBlock);
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.log(`Session ${sessionId} failed to write: ${msg}`);
+            this.sessions.delete(sessionId);
+            throw new Error(`Failed to write to socket: ${msg}`);
+        }
+
+        const isInquireBlock = commandBlock.startsWith('D ');
+        const response = await this.waitForResponse(sessionId, isInquireBlock);
+        return { response };
     }
 
     /**
