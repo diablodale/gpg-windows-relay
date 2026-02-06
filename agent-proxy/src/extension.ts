@@ -74,7 +74,6 @@ async function connectAgent(): Promise<{ sessionId: string; greeting: string }> 
 	try {
 		const result = await agentProxyService.connectAgent();
 		outputChannel.appendLine(`[connectAgent] Session created: ${result.sessionId}`);
-		outputChannel.appendLine(`[connectAgent] Greeting: ${JSON.stringify(result.greeting)}`);
 		outputChannel.appendLine(`[connectAgent] Returning: ${JSON.stringify(result)}`);
 		return result;
 	} catch (error) {

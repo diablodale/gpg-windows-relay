@@ -192,7 +192,7 @@ export class AgentProxy {
                 // Use latin1 to preserve raw bytes without UTF-8 mangling
                 const chunkStr = chunk.toString('latin1');
                 responseData += chunkStr;
-                log(this.config, `[${sessionId}] Received ${chunk.length} bytes from gpg-agent: ${chunkStr.replace(/\n/g, '\\n')}`);   // TODO make output safe ascii in log window
+                log(this.config, `[${sessionId}] Received ${chunk.length} bytes from gpg-agent`);
 
                 // Check if we have a complete response
                 if (this.isCompleteResponse(responseData, isInquireBlock)) {
@@ -200,7 +200,7 @@ export class AgentProxy {
                     session.socket.removeListener('data', dataHandler);
                     session.socket.removeListener('close', closeHandler);
                     session.socket.removeListener('error', errorHandler);
-                    log(this.config, `[${sessionId}] Received complete response from gpg-agent: ${responseData.replace(/\n/g, '\\n')}`);     // TODO make output safe ascii in log window
+                    log(this.config, `[${sessionId}] Complete response from gpg-agent: ${sanitizeForLog(responseData)}`);
                     resolve(responseData);
                 }
             };
@@ -237,7 +237,7 @@ export class AgentProxy {
             return Promise.reject(new Error(`Invalid session: ${sessionId}`));
         }
 
-        log(this.config, `[${sessionId}] Send to gpg-agent: ${commandBlock.replace(/\n/g, '\\n')}`);
+        log(this.config, `[${sessionId}] Send to gpg-agent: ${sanitizeForLog(commandBlock)}`);
 
         try {
             session.socket.write(commandBlock, (error) => {
@@ -334,6 +334,16 @@ export class AgentProxy {
     public getSessionCount(): number {
         return this.sessions.size;
     }
+}
+
+/**
+ * Sanitize string for safe display in log output
+ * Shows first command word and byte count to avoid overwhelming logs
+ */
+function sanitizeForLog(str: string): string {
+    const firstWord = str.split(/[\s\n]/, 1)[0];
+    const remainingBytes = str.length - firstWord.length -1; // -1 for the space/newline after first word
+    return `${firstWord} and ${remainingBytes} more bytes`;
 }
 
 /**
