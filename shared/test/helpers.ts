@@ -62,11 +62,12 @@ export class MockSocket extends EventEmitter {
     public data: Buffer[] = [];
     public destroyed = false;
     public writeError: Error | null = null;
+    private readBuffer: Buffer[] = [];
 
     write(data: Buffer | string, callback?: (err?: Error | null) => void): boolean {
         if (this.destroyed) {
             if (callback) {
-                callback(new Error('Socket is destroyed'));
+                setImmediate(() => callback(new Error('Socket is destroyed')));
             }
             return false;
         }
@@ -78,13 +79,13 @@ export class MockSocket extends EventEmitter {
             const err = this.writeError;
             this.writeError = null;
             if (callback) {
-                callback(err);
+                setImmediate(() => callback(err));
             }
             return false;
         }
 
         if (callback) {
-            callback(null);
+            setImmediate(() => callback(null));
         }
         return true;
     }
@@ -102,18 +103,29 @@ export class MockSocket extends EventEmitter {
         this.emit('close');
     }
 
+    pause(): void {
+        // Mock pause/resume for flow control
+    }
+
+    resume(): void {
+        // Mock pause/resume for flow control
+    }
+
     // Test helper methods
     getWrittenData(): Buffer {
         return Buffer.concat(this.data);
     }
 
     read(): Buffer | null {
-        return null;
+        if (this.readBuffer.length === 0) {
+            return null;
+        }
+        return this.readBuffer.shift()!;
     }
 
     simulateDataReceived(data: Buffer): void {
+        this.readBuffer.push(data);
         this.emit('readable');
-        // Mock implementation - in real usage, read() would be called
     }
 
     simulateError(error: Error): void {
@@ -122,6 +134,7 @@ export class MockSocket extends EventEmitter {
 
     clearData(): void {
         this.data = [];
+        this.readBuffer = [];
     }
 }
 

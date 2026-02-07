@@ -105,6 +105,8 @@ export class AgentProxy {
 
                 const connectHandler = () => {
                     log(this.config, `[${sessionId}] Connected to localhost:${port}, sending nonce...`);
+                    // Remove the one-time error handler since connection succeeded
+                    socket.removeListener('error', errorHandler);
                     try {
                         socket.write(nonce, (error) => {
                             clearTimeout(connectionTimeout);
@@ -120,7 +122,14 @@ export class AgentProxy {
                     }
                 };
 
+                const errorHandler = (error: Error) => {
+                    clearTimeout(connectionTimeout);
+                    socket.removeListener('error', errorHandler);
+                    rejectWith(error, 'Connection error during socket setup');
+                };
+
                 const connectionTimeout = setTimeout(() => {
+                    socket.removeListener('error', errorHandler);
                     rejectWith(undefined, 'Timeout: No connection and nonce sent within 5 seconds');
                 }, 5000);
 
@@ -129,6 +138,9 @@ export class AgentProxy {
                     host: 'localhost',
                     port: port
                 }, connectHandler);
+
+                // Listen for connection errors before persistent handlers
+                socket.on('error', errorHandler);
 
                 // Add to sessions map, set persistent handlers
                 this.sessions.set(sessionId, {
