@@ -107,6 +107,10 @@ export class MockSocket extends EventEmitter {
         return Buffer.concat(this.data);
     }
 
+    read(): Buffer | null {
+        return null;
+    }
+
     simulateDataReceived(data: Buffer): void {
         this.emit('readable');
         // Mock implementation - in real usage, read() would be called
@@ -259,7 +263,10 @@ export class MockSocketFactory implements ISocketFactory {
     public sockets: MockSocket[] = [];
     public connectError: Error | null = null;
 
-    createConnection(options: { host: string; port: number } | { path: string }): any {
+    createConnection(
+        options: { host: string; port: number } | { path: string },
+        connectListener?: () => void
+    ): any {
         const socket = new MockSocket();
         this.sockets.push(socket);
 
@@ -269,6 +276,9 @@ export class MockSocketFactory implements ISocketFactory {
                 socket.emit('error', this.connectError);
             } else {
                 socket.emit('connect');
+                if (connectListener) {
+                    connectListener();
+                }
             }
         });
 

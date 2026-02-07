@@ -5,7 +5,6 @@
  * Validates socket server, command processing, state transitions, and client communication.
  */
 
-import { describe, it } from 'mocha';
 import { expect } from 'chai';
 import { startRequestProxy } from '../services/requestProxy';
 import { MockCommandExecutor, MockServerFactory, MockFileSystem, MockSocket, MockLogConfig } from '../../../shared/test/helpers';
@@ -181,7 +180,7 @@ describe('RequestProxy', () => {
 
             // Send a command to the client socket (as if client sent it)
             clientSocket.emit('readable');
-            
+
             // Simulate receiving "GETINFO version\n" from client
             clientSocket.emit('readable'); // Trigger readable handler
 

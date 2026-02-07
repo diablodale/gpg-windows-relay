@@ -5,7 +5,6 @@
  * Validates socket connections, nonce authentication, command handling, and session lifecycle.
  */
 
-import { describe, it } from 'mocha';
 import { expect } from 'chai';
 import { AgentProxy } from '../services/agentProxy';
 import { MockSocketFactory, MockFileSystem, MockLogConfig } from '../../../shared/test/helpers';

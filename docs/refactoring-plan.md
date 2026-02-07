@@ -263,6 +263,9 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 - [x] Install test framework: `npm install --save-dev mocha @types/mocha` (mocha used instead of jest)
 - [x] Standardize assertion style: `chai` with `expect` interface
 - [x] Add VS Code test CLI config for each extension (`.vscode-test.cjs`)
+- [x] Align VS Code test CLI file patterns with emitted output
+- [x] Configure VS Code test CLI to use Mocha BDD UI
+- [x] Add ESLint config per extension (`eslint.config.mjs`) for pretest linting
 - [x] Configure test framework in package.json with `--ui bdd` flag
 - [x] Add test scripts to package.json: `"test"`, `"test:watch"`
 - [x] Add mocha types to tsconfig.json
