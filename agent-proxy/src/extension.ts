@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import { AgentProxy } from './services/agentProxy';
+import { isTestEnvironment } from '../../shared/environment';
 
 // Global agent proxy service instance
 let agentProxyService: AgentProxy | null = null;
@@ -44,17 +45,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 	// Detect Gpg4win and agent socket on startup
 	// Then start agent proxy
-	try {
-		await detectGpg4winPath();
-		await startAgentProxy();
+	if (!isTestEnvironment()) {
+		try {
+			await detectGpg4winPath();
+			await startAgentProxy();
 
-		// Run sanity probe in background (fire-and-forget)
-		// It will update status bar to Ready after successful probe
-		probeGpgAgent();
-	} catch (error: unknown) {
-		outputChannel.appendLine(`Start failed: ${error instanceof Error ? error.message : String(error)}`);
+			// Run sanity probe in background (fire-and-forget)
+			// It will update status bar to Ready after successful probe
+			probeGpgAgent();
+		} catch (error: unknown) {
+			outputChannel.appendLine(`Start failed: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 }
+
+export function deactivate() {
+	// TODO: implement disconnect from GPG Agent Proxy and destroy local socket; likely simillar/same as stopAgentProxy()
+}
+
+// TODO Issue Reporting as defined at https://code.visualstudio.com/api/get-started/wrapping-up#issue-reporting
 
 // ==============================================================================
 // Command handlers for inter-extension communication
@@ -135,6 +144,9 @@ async function disconnectAgent(sessionId: string): Promise<void> {
  * Detect Gpg4win installation path
  */
 async function detectGpg4winPath(): Promise<void> {
+	if (isTestEnvironment()) {
+		return;
+	}
 	const config = vscode.workspace.getConfiguration('gpgAgentProxy');
 	const configPath = config.get<string>('gpg4winPath') || '';
 
@@ -185,6 +197,9 @@ async function detectGpg4winPath(): Promise<void> {
  * Detect GPG agent socket path
  */
 function detectAgentSocket(): void {
+	if (isTestEnvironment()) {
+		return;
+	}
 	if (!detectedGpg4winPath) {
 		return;
 	}
@@ -213,6 +228,9 @@ function detectAgentSocket(): void {
  * Start the agent proxy service
  */
 async function startAgentProxy(): Promise<void> {
+	if (isTestEnvironment()) {
+		return;
+	}
 	if (agentProxyService) {
 		vscode.window.showWarningMessage('Agent proxy already running');
 		return;

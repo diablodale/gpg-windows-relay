@@ -1,10 +1,7 @@
+.vscode-test/
 out
 dist
 node_modules
-.vscode-test/
 *.vsix
-agent-proxy/out
-agent-proxy/*.vsix
-request-proxy/out
-request-proxy/*.vsix
-pack/*.vsix
+**/*.map
+**/*.tsbuildinfo

@@ -25,6 +25,7 @@ export interface RequestProxyDeps {
     commandExecutor?: ICommandExecutor;
     serverFactory?: IServerFactory;
     fileSystem?: IFileSystem;
+    getSocketPath?: () => Promise<string | null>;  // Mockable socket path resolution
 }
 
 export interface RequestProxyInstance {
@@ -49,7 +50,11 @@ export async function startRequestProxy(config: RequestProxyConfig, deps?: Reque
     const commandExecutor = deps?.commandExecutor ?? new VSCodeCommandExecutor();
     const serverFactory = deps?.serverFactory ?? { createServer: net.createServer };
     const fileSystem = deps?.fileSystem ?? { existsSync: fs.existsSync, mkdirSync: fs.mkdirSync, chmodSync: fs.chmodSync, unlinkSync: fs.unlinkSync };
-    const socketPath = await getLocalGpgSocketPath();
+    const getSocketPath = deps?.getSocketPath ?? getLocalGpgSocketPath;
+    const usingMocks = !!(deps?.commandExecutor || deps?.serverFactory || deps?.fileSystem);
+
+    log(config, `[startRequestProxy] using mocked deps: ${usingMocks}`);
+    const socketPath = await getSocketPath();
     if (!socketPath) {
         throw new Error('Could not determine local GPG socket path. Is gpg installed? Try: gpgconf --list-dirs');
     }

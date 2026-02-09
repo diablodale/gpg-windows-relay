@@ -4,9 +4,9 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "build": "tsc && npm run build:agent && npm run build:request",
-    "build:agent": "cd agent-proxy && npm run compile",
-    "build:request": "cd request-proxy && npm run compile",
+    "compile": "npm run compile:agent && npm run compile:request",
+    "compile:agent": "cd agent-proxy && npm run compile",
+    "compile:request": "cd request-proxy && npm run compile",
     "watch": "npm run watch:agent & npm run watch:request",
     "watch:agent": "cd agent-proxy && npm run watch",
     "watch:request": "cd request-proxy && npm run watch",

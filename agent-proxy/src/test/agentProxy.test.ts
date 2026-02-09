@@ -289,4 +289,5 @@ describe('AgentProxy', () => {
             expect(agentProxy.isRunning()).to.equal(false);
         });
     });
+
 });

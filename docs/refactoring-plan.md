@@ -3,7 +3,7 @@
 **Status**: ✅ COMPLETE (Phases 1-3 done, Phases 4-8 partially complete)  
 **Started**: 2026-02-07  
 **Completion Date**: 2026-02-07  
-**Last Updated**: 2026-02-07
+**Last Updated**: 2026-02-09
 
 ## Overview
 
@@ -265,11 +265,14 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 - [x] Add VS Code test CLI config for each extension (`.vscode-test.cjs`)
 - [x] Align VS Code test CLI file patterns with emitted output
 - [x] Configure VS Code test CLI to use Mocha BDD UI
+- [x] Configure VS Code test CLI with timeouts and `--disable-extensions`
 - [x] Add ESLint config per extension (`eslint.config.mjs`) for pretest linting
 - [x] Configure test framework in package.json with `--ui bdd` flag
 - [x] Add test scripts to package.json: `"test"`, `"test:watch"`
 - [x] Add mocha types to tsconfig.json
 - [x] Create shared/__tests__/ directory for test files
+- [x] Add per-extension test runner entrypoints (`src/test/suite/index.ts`)
+- [x] Add launch.json entries for test debugging with correct `outFiles`
 
 **Note**: Used Mocha test framework instead of Jest - provides equivalent BDD testing capability with simpler configuration.
 
@@ -407,6 +410,14 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 - ✅ TypeScript compilation succeeds
 - ✅ Mock helpers properly isolate tests from real GPG agent
 
+### 6.6 Test Isolation & Debugging Hardening
+
+- [x] Add shared `isTestEnvironment()` helper
+- [x] Guard auto-start in extensions during tests
+- [x] Inject mockable `getSocketPath()` to avoid real gpgconf calls in tests
+- [x] Update request-proxy tests to use `createMockDeps()`
+- [x] Update launch.json `outFiles` to bind breakpoints in extension code
+
 **Phase 6 Complete** - Full test coverage achieved with mocked dependencies
 
 ---
@@ -419,13 +430,13 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 
 ### 7.1 TypeScript Configuration
 
-**File**: `tsconfig.json`
+**Files**: `shared/tsconfig.json`, `agent-proxy/tsconfig.json`, `request-proxy/tsconfig.json`
 
-- [x] Create root tsconfig.json for shared/ compilation
-- [x] Configure types array with ["node", "mocha"]
-- [x] Remove/fix rootDir constraints from child tsconfigs (was causing TS6059 errors)
+- [x] Create shared project tsconfig with `composite` and `declarationDir`
+- [x] Set `rootDir` in extension tsconfigs for clean output paths
+- [x] Add project references to shared tsconfig in both extensions
+- [x] Remove root tsconfig.json (unused after project references)
 - [x] Verify compilation: all extensions build successfully
-- [x] Update package.json build script to compile shared first: `tsc && npm run build:agent && npm run build:request`
 
 **Results**: Fixed TypeScript module resolution issues by removing rootDir constraints and establishing root-level compilation stage
 
@@ -433,7 +444,8 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 
 **File**: `package.json`
 
-- [x] Build script includes shared/ compilation first: `tsc && npm run build:agent && npm run build:request`
+- [x] Root compile script delegates to extension compile scripts
+- [x] Extension compile scripts use `tsc --build` for project references
 - [x] Watch mode works for all folders
 - [x] Test scripts added: `"test"` and `"test:watch"`
 - [x] Clean script updated to include shared/ output
@@ -688,9 +700,20 @@ If critical issues are found:
 
 ## Notes
 
-### Current Status Update (Session 4 - Complete)
+### Current Status Update (Session 5 - Complete)
+
+**Completed in Session 5**:
+
+- Phase 6.1: Test CLI config updates (timeouts, disable extensions) ✅
+- Phase 6.1: Added per-extension test runner entrypoints ✅
+- Phase 6.6: Test isolation guards + mock socket path injection ✅
+- Phase 7.1: Shared project references and rootDir cleanup ✅
+- Phase 7.2: Compile/watch scripts updated for project references ✅
+- Phase 7.2: Packaging ignores aligned (.vscodeignore, .gitignore) ✅
+- Launch config updated for test debugging breakpoints ✅
 
 **Completed in Session 4**:
+
 - Phase 4.1-4.3: RequestProxy deps parameter and dependency injection ✅
 - Phase 5.1-5.2: Agent-proxy and request-proxy error handling updates ✅
 - Phase 6.2: Test mock helpers (8 classes) ✅
@@ -698,6 +721,7 @@ If critical issues are found:
 - Phase 6.5: Request-Proxy integration tests (16 test cases) ✅
 
 **Previously Completed (Sessions 1-3)**:
+
 - Phase 1: Function migration & extraction ✅
 - Phase 2: Shared type definitions ✅
 - Phase 3: Logging utilities ✅
@@ -707,15 +731,10 @@ If critical issues are found:
 - Phase 7: TypeScript config & build improvements ✅
 
 **Remaining Phases**:
+
 - Phase 7.3: Repository documentation (.github/copilot-instructions.md, README.md)
 - Phase 8: Build verification and runtime testing
-- Phase 7: TypeScript config & build improvements ✅
-
-**Pending Phases**:
-- Phase 6.2: Create test mock helpers
-- Phase 6.4, 6.5: Integration tests
-- Phase 7.3: Update repository documentation
-- Phase 8: Build verification and runtime testing
+- Phase 9: Dependency Injection & Integration Tests
 
 ### Key Accomplishments
 

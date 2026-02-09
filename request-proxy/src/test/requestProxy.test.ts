@@ -22,15 +22,19 @@ describe('RequestProxy', () => {
         mockFileSystem = new MockFileSystem();
     });
 
+    // Helper to create deps with all mocks including getSocketPath
+    const createMockDeps = () => ({
+        commandExecutor: mockCommandExecutor,
+        serverFactory: mockServerFactory,
+        fileSystem: mockFileSystem,
+        getSocketPath: async () => '/tmp/test-gpg-agent'  // Mock path - prevents calling real gpgconf
+    });
+
     describe('server initialization', () => {
         it('should create Unix socket server at correct path', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             expect(mockServerFactory.getServers()).to.have.length(1);
@@ -43,11 +47,7 @@ describe('RequestProxy', () => {
         it('should create socket directory if it does not exist', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             expect(mockFileSystem.getCallCount('mkdirSync')).to.be.greaterThan(0);
@@ -58,11 +58,7 @@ describe('RequestProxy', () => {
         it('should set socket permissions to 0o666', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             expect(mockFileSystem.getCallCount('chmodSync')).to.be.greaterThan(0);
@@ -75,11 +71,7 @@ describe('RequestProxy', () => {
         it('should accept client connections', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -94,11 +86,7 @@ describe('RequestProxy', () => {
         it('should handle multiple simultaneous clients', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -118,11 +106,7 @@ describe('RequestProxy', () => {
         it('should connect to agent on client connection', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -144,11 +128,7 @@ describe('RequestProxy', () => {
 
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -166,11 +146,7 @@ describe('RequestProxy', () => {
         it('should extract complete command lines from client', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -200,11 +176,7 @@ describe('RequestProxy', () => {
 
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -226,11 +198,7 @@ describe('RequestProxy', () => {
 
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -252,11 +220,7 @@ describe('RequestProxy', () => {
 
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -270,11 +234,7 @@ describe('RequestProxy', () => {
         it('should wait for D block followed by END before responding', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -288,11 +248,7 @@ describe('RequestProxy', () => {
         it('should destroy socket on write error', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -314,11 +270,7 @@ describe('RequestProxy', () => {
 
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -335,11 +287,7 @@ describe('RequestProxy', () => {
         it('should log client socket errors', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -363,11 +311,7 @@ describe('RequestProxy', () => {
         it('should stop gracefully and clean up socket', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -382,11 +326,7 @@ describe('RequestProxy', () => {
         it('should disconnect agent when client closes', async () => {
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
-                {
-                    commandExecutor: mockCommandExecutor,
-                    serverFactory: mockServerFactory,
-                    fileSystem: mockFileSystem
-                }
+                createMockDeps()
             );
 
             const server = mockServerFactory.getServers()[0];
@@ -404,4 +344,6 @@ describe('RequestProxy', () => {
             await instance.stop();
         });
     });
+
 });
+

@@ -3,6 +3,7 @@
 		"module": "Node16",
 		"target": "ES2022",
 		"outDir": "out",
+		"rootDir": "src",
 		"lib": [
 			"ES2022"
 		],
@@ -11,5 +12,8 @@
 		"strict": true
 	},
 	"include": ["src/**/*"],
-	"exclude": ["node_modules", "out"]
+	"exclude": ["node_modules", "out"],
+	"references": [
+		{ "path": "../shared/tsconfig.json" }
+	]
 }

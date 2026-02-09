@@ -13,6 +13,7 @@ import * as vscode from 'vscode';
 import { startRequestProxy } from './services/requestProxy';
 import { extractErrorMessage } from '../../shared/protocol';
 import { VSCodeCommandExecutor } from './services/commandExecutor';
+import { isTestEnvironment } from '../../shared/environment';
 
 let requestProxyInstance: Awaited<ReturnType<typeof startRequestProxy>> | null = null;
 
@@ -34,11 +35,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
 
         // Start request proxy on remote
-        try {
-            await startRequestProxyHandler(outputChannel);
-        } catch (err) {
-            // Error already logged by handler, but show output
-            outputChannel.show();
+        if (!isTestEnvironment()) {
+            try {
+                await startRequestProxyHandler(outputChannel);
+            } catch (err) {
+                // Error already logged by handler, but show output
+                outputChannel.show();
+            }
         }
     } catch (error) {
         const message = extractErrorMessage(error);

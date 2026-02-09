@@ -1,0 +1,25 @@
+{
+	"compilerOptions": {
+		"module": "Node16",
+		"target": "ES2022",
+		"outDir": ".",
+		"lib": [
+			"ES2022"
+		],
+		"sourceMap": true,
+		"skipLibCheck": true,
+		"strict": true,
+		"composite": true,
+		"declaration": true,
+		"declarationDir": "out"
+	},
+	"include": [
+		"*.ts",
+		"test/**/*.ts"
+	],
+	"exclude": [
+		"node_modules",
+		"out",
+		"__tests__"
+	]
+}

@@ -1,8 +1,14 @@
 const { defineConfig } = require('@vscode/test-cli');
 
 module.exports = defineConfig({
-    files: 'out/agent-proxy/src/test/**/*.test.js',
+    files: 'out/test/**/*.test.js',
     mocha: {
-        ui: 'bdd'
-    }
+        ui: 'bdd',
+        // Keep parity with launch.json to avoid test runner timeouts.
+        timeout: 120000
+    },
+    launchArgs: [
+        // Prevent other extensions from activating during tests.
+        '--disable-extensions'
+    ]
 });

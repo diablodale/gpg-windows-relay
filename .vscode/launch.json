@@ -6,14 +6,32 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			"name": "Test Agent Proxy Extension",
+			"name": "Extension Tests: Agent Proxy",
 			"type": "extensionHost",
 			"request": "launch",
+			"runtimeExecutable": "${execPath}",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}/agent-proxy"
+				"--disable-extensions",
+				"--extensionDevelopmentPath=${workspaceFolder}/agent-proxy",
+				"--extensionTestsPath=${workspaceFolder}/agent-proxy/out/test/suite/index"
 			],
 			"outFiles": [
 				"${workspaceFolder}/agent-proxy/out/**/*.js"
+			],
+			"preLaunchTask": "${defaultBuildTask}"
+		},
+		{
+			"name": "Extension Tests: Request Proxy",
+			"type": "extensionHost",
+			"request": "launch",
+			"runtimeExecutable": "${execPath}",
+			"args": [
+				"--disable-extensions",
+				"--extensionDevelopmentPath=${workspaceFolder}/request-proxy",
+				"--extensionTestsPath=${workspaceFolder}/request-proxy/out/test/suite/index"
+			],
+			"outFiles": [
+				"${workspaceFolder}/request-proxy/out/**/*.js"
 			],
 			"preLaunchTask": "${defaultBuildTask}"
 		}

@@ -55,10 +55,11 @@ class MockSocket extends events_1.EventEmitter {
     data = [];
     destroyed = false;
     writeError = null;
+    readBuffer = [];
     write(data, callback) {
         if (this.destroyed) {
             if (callback) {
-                callback(new Error('Socket is destroyed'));
+                setImmediate(() => callback(new Error('Socket is destroyed')));
             }
             return false;
         }
@@ -68,12 +69,12 @@ class MockSocket extends events_1.EventEmitter {
             const err = this.writeError;
             this.writeError = null;
             if (callback) {
-                callback(err);
+                setImmediate(() => callback(err));
             }
             return false;
         }
         if (callback) {
-            callback(null);
+            setImmediate(() => callback(null));
         }
         return true;
     }
@@ -88,19 +89,32 @@ class MockSocket extends events_1.EventEmitter {
         this.emit('end');
         this.emit('close');
     }
+    pause() {
+        // Mock pause/resume for flow control
+    }
+    resume() {
+        // Mock pause/resume for flow control
+    }
     // Test helper methods
     getWrittenData() {
         return Buffer.concat(this.data);
     }
+    read() {
+        if (this.readBuffer.length === 0) {
+            return null;
+        }
+        return this.readBuffer.shift();
+    }
     simulateDataReceived(data) {
+        this.readBuffer.push(data);
         this.emit('readable');
-        // Mock implementation - in real usage, read() would be called
     }
     simulateError(error) {
         this.emit('error', error);
     }
     clearData() {
         this.data = [];
+        this.readBuffer = [];
     }
 }
 exports.MockSocket = MockSocket;
@@ -224,7 +238,7 @@ exports.MockCommandExecutor = MockCommandExecutor;
 class MockSocketFactory {
     sockets = [];
     connectError = null;
-    createConnection(options) {
+    createConnection(options, connectListener) {
         const socket = new MockSocket();
         this.sockets.push(socket);
         // Simulate connection events in next tick
@@ -234,6 +248,9 @@ class MockSocketFactory {
             }
             else {
                 socket.emit('connect');
+                if (connectListener) {
+                    connectListener();
+                }
             }
         });
         return socket;
