@@ -19,8 +19,11 @@
     "package:agent": "cd agent-proxy && npm run package",
     "package:request": "cd request-proxy && npm run package",
     "package:pack": "cd pack && npm run package",
-    "test": "mocha --ui bdd shared/**/__tests__/**/*.test.js",
-    "test:watch": "mocha --ui bdd shared/**/__tests__/**/*.test.js --watch",
+    "test": "npm run test:shared && npm run test:agent && npm run test:request",
+    "test:shared": "cd shared && npm test",
+    "test:agent": "cd agent-proxy && npm test",
+    "test:request": "cd request-proxy && npm test",
+    "test:watch": "cd shared && npm run test:watch",
     "clean": "rimraf -g \"agent-proxy/out\" \"request-proxy/out\" \"agent-proxy/gpg-agent-proxy-*.vsix\" \"request-proxy/gpg-request-proxy-*.vsix\" \"pack/gpg-windows-relay-*.vsix\" \"shared/out\" \"shared/**/*.d.ts\" \"shared/**/*.d.ts.map\""
   },
   "devDependencies": {

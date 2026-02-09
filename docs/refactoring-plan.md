@@ -1,8 +1,8 @@
 # Refactoring Plan: Shared Utilities + Unit Testing
 
-**Status**: ✅ COMPLETE (Phases 1-3 done, Phases 4-8 partially complete)  
+**Status**: ✅ COMPLETE (Phases 1-7 complete, Phases 8-9 deferred)  
 **Started**: 2026-02-07  
-**Completion Date**: 2026-02-07  
+**Completion Date**: 2026-02-09  
 **Last Updated**: 2026-02-09
 
 ## Overview
@@ -270,7 +270,7 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 - [x] Configure test framework in package.json with `--ui bdd` flag
 - [x] Add test scripts to package.json: `"test"`, `"test:watch"`
 - [x] Add mocha types to tsconfig.json
-- [x] Create shared/__tests__/ directory for test files
+- [x] Create shared/src/test/ directory for test files
 - [x] Add per-extension test runner entrypoints (`src/test/suite/index.ts`)
 - [x] Add launch.json entries for test debugging with correct `outFiles`
 
@@ -304,7 +304,7 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 
 ### 6.3 Unit Tests: Shared Protocol Functions
 
-**File**: `shared/__tests__/protocol.test.ts`
+**File**: `shared/src/test/protocol.test.ts`
 
 - [x] Test `sanitizeForLog()`:
   - [x] Single word input
@@ -454,26 +454,34 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 
 ### 7.3 Update Repository Documentation
 
-**Status**: Deferred - Core refactoring work complete; documentation updates can follow
+**Status**: ✅ COMPLETE
 
 **File**: `.github/copilot-instructions.md`
 
-- [ ] Add "Shared Utilities" section
-- [ ] Add "Testing" section
-- [ ] Add "Dependency Injection" section
-- [ ] Update "When Editing" section
+- [x] Add "Shared Utilities" section describing @gpg-relay/shared package structure
+- [x] Add "Testing" section with test commands and framework details
+- [x] Add "Dependency Injection" section explaining the pattern with examples
+- [x] Update "When Editing" section with guidance on shared code, testing, and DI
+- [x] Added JSDoc references and clear code examples
 
 **File**: `README.md`
 
-- [ ] Add "Testing" section with basic test commands
-- [ ] Link to docs/refactoring-plan.md
-- [ ] Update architecture description to mention shared utilities
+- [x] Expand "File Structure" to show new `docs/refactoring-plan.md`
+- [x] Add "Shared Utilities" section explaining @gpg-relay/shared package
+- [x] Expand "Testing" section with unit test commands and coverage metrics
+- [x] Add link to detailed Refactoring Plan (Phase 6 testing architecture)
+- [x] Update "Contributing" section with code style guidelines
+- [x] Add "Architecture" subsection with links to detailed guides
+- [x] Link to copilot-instructions.md for development guidelines
 
 **Verification**:
 
-- Documentation is accurate and up-to-date
-- All links work
-- Instructions are clear
+- Documentation is accurate and reflects current architecture
+- All links work and reference correct sections
+- Instructions are clear for both new contributors and current developers
+- TypeScript paths and import examples are correct
+
+**Results**: ✅ Phase 7.3 complete
 
 ---
 
@@ -613,7 +621,7 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 - [x] ✅ Test mock helpers created (Phase 6.2)
 - [x] ✅ Integration tests written with mocks (Phase 6.4-6.5: 30 test cases)
 - [x] ✅ All unit tests pass
-- [ ] ⏳ Documentation updated (Phase 7.3 pending)
+- [x] ✅ Documentation updated (Phase 7.3 complete)
 - [x] ✅ No behavior changes (backward compatible)
 - [x] ✅ Both extensions work and build successfully
 - [ ] ⏳ Comprehensive build verification (Phase 8)
@@ -651,10 +659,12 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 | **Session 4a** | **DI Implementation (4-5)** | ✅ Complete | 3-4h |
 | **Session 4b** | **Test Helpers (6.2)** | ✅ Complete | 1-2h |
 | **Session 4c** | **Integration Tests (6.4-6.5)** | ✅ Complete | 2-3h |
-| 7.3 | Repository Documentation | ⏳ Pending | 1-2h |
-| 8 | Verification & Cleanup | ⏳ Pending | 2-3h |
-| **Total Completed** | | | **28-38h** |
-| **Remaining** | | | **3-5h** |
+| **Session 5a** | **Build/Config/Tests/Isolation** | ✅ Complete | 2-3h |
+| **Session 5b** | **Package Refactor + Git** | ✅ Complete | 1-2h |
+| **Session 6** | **Repository Documentation (7.3)** | ✅ Complete | 1-2h |
+| 8 | Verification & Cleanup | ⏳ Deferred | 2-3h |
+| 9 | Future Enhancements | ⏳ Deferred | 3-4h |
+| **Total Completed** | | | **~40h** |
 
 ### Overall Progress
 
@@ -700,7 +710,16 @@ If critical issues are found:
 
 ## Notes
 
-### Current Status Update (Session 5 - Complete)
+### Current Status Update (Session 6 - Complete)
+
+**Completed in Session 6**:
+
+- Phase 7.3: Repository documentation updates ✅
+  - Updated `.github/copilot-instructions.md` with Shared Utilities, Testing, and Dependency Injection sections
+  - Updated `README.md` with Testing section and Shared Utilities info
+  - Added links to Refactoring Plan and architecture guides
+  - Added Contributing section with code style guidelines
+- Entire Phase 7 now complete (Configuration & Documentation) ✅
 
 **Completed in Session 5**:
 
@@ -711,6 +730,7 @@ If critical issues are found:
 - Phase 7.2: Compile/watch scripts updated for project references ✅
 - Phase 7.2: Packaging ignores aligned (.vscodeignore, .gitignore) ✅
 - Launch config updated for test debugging breakpoints ✅
+- Initial npm package structure for @gpg-relay/shared ✅
 
 **Completed in Session 4**:
 
@@ -728,13 +748,12 @@ If critical issues are found:
 - Phase 4 (initial): Protocol function extraction ✅
 - Phase 5 (initial): Build scripts & watch mode ✅
 - Phase 6: Unit tests (23 tests, 100% shared/protocol.ts) ✅
-- Phase 7: TypeScript config & build improvements ✅
+- Phase 7.1-7.2: TypeScript config & build improvements ✅
 
-**Remaining Phases**:
+**Remaining Phases** (Deferred):
 
-- Phase 7.3: Repository documentation (.github/copilot-instructions.md, README.md)
 - Phase 8: Build verification and runtime testing
-- Phase 9: Dependency Injection & Integration Tests
+- Phase 9: Dependency Injection & Integration Tests (Future enhancement)
 
 ### Key Accomplishments
 

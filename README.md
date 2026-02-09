@@ -213,9 +213,27 @@ Immediate disconnect if either side closes
  pack/
     package.json               # Extension pack manifest
  .gitignore
+ docs/
+    refactoring-plan.md    # Detailed architecture & testing guide
  README.md
  LICENSE
 ```
+
+## Shared Utilities
+
+The `shared/` folder contains reusable code packaged as `@gpg-relay/shared` for both extensions:
+
+- **protocol.ts**: Pure functions for Assuan protocol parsing (latin1 encoding, error handling, command extraction)
+- **types.ts**: Shared type definitions and dependency injection interfaces
+- **test/helpers.ts**: Mock implementations for testing without real sockets or VS Code runtime
+
+This design enables:
+- 100% coverage of core protocol logic
+- Integration tests with mocked dependencies
+- No external dependencies during testing
+- Backward-compatible optional dependency injection
+
+For architectural details, see [Refactoring Plan](../docs/refactoring-plan.md).
 
 ## Development
 
@@ -254,6 +272,29 @@ Produces `.vsix` files ready to install.
 Press `F5` in each extension folder to launch debug host.
 
 ## Testing
+
+### Unit Tests
+
+Run all tests:
+
+```powershell
+npm test
+```
+
+Watch mode for development:
+
+```powershell
+npm run test:watch
+```
+
+**Test Coverage:**
+
+- Shared protocol functions: 23 unit tests (100% coverage)
+- AgentProxy service: 9 integration tests with mocks
+- RequestProxy service: 17 integration tests with mocks
+- Total: 49 tests passing with no external dependencies
+
+For detailed test architecture, see [Refactoring Plan - Phase 6](../docs/refactoring-plan.md#phase-6-testing-infrastructure).
 
 ### Manual Testing
 
@@ -319,7 +360,19 @@ Check output channels:
 
 ## Contributing
 
-For detailed architecture notes, see code comments in:
+### Code Style
 
+- Language: TypeScript. Configuration in `tsconfig.json`.
+- Linting/formatting: Follow existing patterns in `eslint.config.mjs` and existing code.
+- Logging: Use the module-level `log(config, message)` helper pattern (see services). Do not log raw binary data.
+
+### Guidance
+
+For guidance on editing, see:
+
+- [Architecture](#architecture) - How it works and architecture
+- [.github/copilot-instructions.md](../.github/copilot-instructions.md) - Full development guidelines
+- [Refactoring Plan](../docs/refactoring-plan.md) - Architecture decisions and test strategy
 - `agent-proxy/src/services/agentProxy.ts` - Assuan protocol details
-- `request-proxy/src/services/requestProxy.ts` - Proxy implementation
+- `request-proxy/src/services/requestProxy.ts` - Proxy state machine
+- `shared/src/protocol.ts` - Pure protocol functions (100% testable)

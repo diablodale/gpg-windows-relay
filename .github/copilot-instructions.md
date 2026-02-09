@@ -33,13 +33,15 @@ When a logically complete units of work or significant change is made, follow th
 1. Ensure all changes are complete and tested locally.
 2. Update documentation, plans, todo lists, and architecture diagrams to reflect the change.
 3. Ask me if I am ready for a commit and provide a summary of the changes and any relevant context.
-4. Commit all changes together using [source control](#source-control) guidelines.
+4. Commit all changes together using the above [source control](#source-control) guidelines.
 
 ## Architecture
 
 - Two small extensions communicate over VS Code commands: `_gpg-agent-proxy.connectAgent`, `_gpg-agent-proxy.sendCommands`, and `_gpg-agent-proxy.disconnectAgent` (see `agent-proxy/src/extension.ts`).
 - `request-proxy` listens on the local GPG Unix socket and acts as a bridge between the calling GPG process and `agent-proxy`.
 - `agent-proxy` handles the Assuan/GPG protocol specifics, including nonce authentication and session lifecycle.
+- Shared code is packaged as `@gpg-relay/shared` npm package (`file:../shared` dependency) for clean imports and testability.
+  Import this with `from '@gpg-relay/shared'` or `from '@gpg-relay/shared/test'`.
 
 Key files:
 
@@ -47,36 +49,48 @@ Key files:
 - [agent-proxy/src/extension.ts](../agent-proxy/src/extension.ts)
 - [request-proxy/src/services/requestProxy.ts](../request-proxy/src/services/requestProxy.ts)
 - [request-proxy/src/extension.ts](../request-proxy/src/extension.ts)
-- [shared/protocol.ts](../shared/protocol.ts) (shared protocol utilities for Assuan/GPG protocol handling)
-- [shared/types.ts](../shared/types.ts) (shared types, e.g., for logging and sanitization)
+- [shared/src/protocol.ts](../shared/src/protocol.ts) (shared utilities for Assuan/GPG protocol, latin1 encoding, error handling, command extraction)
+- [shared/src/types.ts](../shared/src/types.ts) (shared types for logging, sanitization, dependency injection)
+- [shared/src/test/helpers.ts](../shared/src/test/helpers.ts) (shared mock implementations for testing with dependency injection)
 
-## Build and Test
+## Testing
 
-Use Powershell on Windows hosts. Use bash on Linux/macOS hosts.
+Run `npm test` or `npm run test:watch`. Framework: Mocha (BDD) + Chai (expect). When adding tests:
+* write unit tests for pure functions in `shared/src/test/`
+* integration tests in `<extension>/src/test/`
+* use mocks from `@gpg-relay/shared/test` for socket/file/command interactions
+* target >70% coverage via dependency injection
 
-Recommended commands (run from repository root):
+## Dependency Injection
 
-```text
-# Install dependencies for both extensions:
-npm install
-# Build both extensions:
-npm run compile
-# Development watch (extension build):
-npm run watch
-# Create a packaged extension (.vsix)
-npm run package
+Both services support optional dependency injection via `*Deps` interfaces. AgentProxy accepts socketFactory and fileSystem. RequestProxy accepts commandExecutor, serverFactory, fileSystem, and getSocketPath. Pass mocks via optional deps parameter to test without VS Code runtime or real sockets. Enables isolated testing, systematic error scenarios, and deterministic execution. Example:
+
+```typescript
+wait startRequestProxy(config, {
+    commandExecutor: new MockCommandExecutor(),
+    serverFactory: new MockServerFactory(),
+    fileSystem: new MockFileSystem(),
+    getSocketPath: async () => '/tmp/test-gpg-agent'
+});
 ```
 
-If you add tests, follow the project structure and update `package.json` scripts so CI can run them.
+## Build & Packaging
 
-## Project Conventions (explicit)
+Use Powershell on Windows hosts. Use bash on Linux/macOS hosts. From repository root:
 
-- Binary / protocol data: All socket I/O preserves raw bytes using `latin1` encoding inside the proxy code. When logging, never print raw `latin1` content — use the provided sanitizers.
-  - See `sanitizeForLog()` usage in both `agent-proxy` and `request-proxy` to display first command token plus remaining byte count.
-- Logging pattern: prefer module-level `log(config, message)` and pass the `AgentProxyConfig` / `RequestProxyConfig` callbacks rather than calling `console.log` directly.
-- Session lifecycle: `agent-proxy` stores sessions in a `Map` keyed by UUID; session cleanup is driven by socket `'close'` handlers. Prefer `socket.destroy()` to force cleanup on unrecoverable errors.
-- Status UI: `agent-proxy` exposes a `statusBarCallback` and sets `probeSuccessful` after a successful probe — update the status bar only when both the service exists and the probe succeeded (see `agent-proxy/src/extension.ts`).
-- Error handling: async functions should rethrow after local cleanup if the caller expects rejection (e.g., `connectToAgent` should `throw` after destroying client socket so the caller can react).
+- **`npm install`** — installs root dependencies and auto-runs postinstall hooks to install subfolders
+- **`npm run compile`** — builds in dependency order: shared → agent-proxy → request-proxy
+- **`npm run watch`** — runs watch mode in all folders simultaneously (rebuilds on file change)
+- **`npm run package`** — creates packaged extension (.vsix files)
+
+Each extension compiles to its own `out/` folder via TypeScript, and shared code is packaged as `@gpg-relay/shared` npm module imported with `file:../shared` dependencies.
+
+## Project Conventions
+
+- **Protocol**: Use `latin1` encoding for socket I/O (preserves raw bytes). Never log raw binary; use `sanitizeForLog()` (first token + byte count).
+- **Logging**: Use module-level `log(config, message)` with config callbacks, not `console.log`.
+- **Sessions**: Stored in `Map` keyed by UUID; cleanup via socket 'close' handlers. Use `socket.destroy()` for unrecoverable errors.
+- **Error handling**: Async functions rethrow after local cleanup if caller expects rejection.
 
 ## Integration Points
 
@@ -85,21 +99,18 @@ If you add tests, follow the project structure and update `package.json` scripts
 
 ## Security
 
-- Use the [GPG agent Assuan protocol](https://www.gnupg.org/documentation/manuals/gnupg/Agent-Protocol.html)
-  which is also documented briefly in [gpg-agent-protocol.md](../docs/gpg-agent-protocol.md) and shown in the sequence diagram in [state-diagram.md](../docs/state-diagram.md).
-- Use the "extra" gpg-agent socket. The extra socket (usually named `S.gpg-agent.extra`) is designed for remote use.
-  It has restricted access and requires nonce authentication. It provides access to only a limited set of cryptographic operations.
-  None of these operations transmit secrets. All sensitive operations (e.g., signing, decryption) happen inside the GPG agent process
-  and are never transmitted over either of these vscode extensions. These proxy extensions must only relay commands and responses
-  of public information and hashs, and never have access to raw secrets or private keys.
-- Do not expose raw binary content or sensitive/secrets in logs. Use `sanitizeForLog()` (first token + byte-count) for all protocol logging.
-- Filesystem access: The extension reads the GPG socket file and must validate its contents (port and 16-byte nonce). Keep these checks strict.
+- Uses [GPG agent Assuan protocol](https://www.gnupg.org/documentation/manuals/gnupg/Agent-Protocol.html) via "extra" gpg-agent socket (S.gpg-agent.extra) with nonce authentication. See [gpg-agent-protocol.md](../docs/gpg-agent-protocol.md).
+- Extensions only relay commands/responses of public data—no secrets or private keys are transmitted. All sensitive operations stay in GPG agent process.
+- Never log raw binary content. Use `sanitizeForLog()` for protocol logging.
+- Validate socket file contents strictly (port + 16-byte nonce).
 
 ## When Editing
 
-- Reference the four key files above when changing protocol behavior.
-- Run `npm run watch` during development and `npm run package` to validate packaging.
-- If you change public command names or payload formats, update both extensions and add a migration note in this file.
+**Code**: Reference key files in Architecture section. Run `npm run compile` to build, `npm run watch` during development, `npm run package` to validate packaging. Update both extensions if changing public commands.
+
+**Shared code**: Add utilities to `shared/src/` (pure functions in protocol.ts, types in types.ts), re-export from index.ts, import via `@gpg-relay/shared`.
+
+**Testing**: Write unit tests in shared/src/test/ for pure functions, integration tests in <extension>/src/test/ for services. Add `*Deps` interfaces for DI with pattern `constructor(config: Config, deps?: Partial<Deps>)`. Run `npm test` before committing. Target >70% coverage.
 
 ---
 
