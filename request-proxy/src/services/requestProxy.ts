@@ -14,8 +14,8 @@ import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
-import { log, encodeProtocolData, decodeProtocolData, sanitizeForLog, extractErrorMessage, extractNextCommand, determineNextState } from '../../../shared/protocol';
-import type { LogConfig, ICommandExecutor, IFileSystem, IServerFactory } from '../../../shared/types';
+import { log, encodeProtocolData, decodeProtocolData, sanitizeForLog, extractErrorMessage, extractNextCommand, determineNextState } from '@gpg-relay/shared';
+import type { LogConfig, ICommandExecutor, IFileSystem, IServerFactory } from '@gpg-relay/shared';
 import { VSCodeCommandExecutor } from './commandExecutor';
 
 export interface RequestProxyConfig extends LogConfig {

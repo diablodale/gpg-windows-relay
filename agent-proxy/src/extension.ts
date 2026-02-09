@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import { AgentProxy } from './services/agentProxy';
-import { isTestEnvironment } from '../../shared/environment';
+import { isTestEnvironment } from '@gpg-relay/shared';
 
 // Global agent proxy service instance
 let agentProxyService: AgentProxy | null = null;

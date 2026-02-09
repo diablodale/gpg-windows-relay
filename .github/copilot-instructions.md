@@ -14,6 +14,8 @@ This workspace contains two cooperating VS Code extensions written in TypeScript
 ## Source Control
 
 - Use Git for all version control operations.
+- All commits must be GPG signed. This should be automatic due to .gitconfig settings. If you receive an error
+  about this automatic GPG signing, then inform the user and stop the commit so they can fix their GPG configuration.
 - Commit changes as logically complete units of work (e.g., a new feature, a bug fix, or a refactor).
 - Follow the *Conventional Commits v1* specification for commit messages
   (e.g., `feat: add proxy command`, `fix: handle socket errors`, `docs: update architecture docs`).
@@ -23,6 +25,15 @@ This workspace contains two cooperating VS Code extensions written in TypeScript
   3. Then commit all work, including todo/plan/docs, to Git.
      This keeps the commit history aligned with the plan and makes the evolution of the project easier to understand.
   4. Only after committing to git, can you proceed to the next phase of work.
+
+## Regular Checkpoints
+
+When a logically complete units of work or significant change is made, follow this process:
+
+1. Ensure all changes are complete and tested locally.
+2. Update documentation, plans, todo lists, and architecture diagrams to reflect the change.
+3. Ask me if I am ready for a commit and provide a summary of the changes and any relevant context.
+4. Commit all changes together using [source control](#source-control) guidelines.
 
 ## Architecture
 
@@ -36,16 +47,20 @@ Key files:
 - [agent-proxy/src/extension.ts](../agent-proxy/src/extension.ts)
 - [request-proxy/src/services/requestProxy.ts](../request-proxy/src/services/requestProxy.ts)
 - [request-proxy/src/extension.ts](../request-proxy/src/extension.ts)
+- [shared/protocol.ts](../shared/protocol.ts) (shared protocol utilities for Assuan/GPG protocol handling)
+- [shared/types.ts](../shared/types.ts) (shared types, e.g., for logging and sanitization)
 
 ## Build and Test
 
+Use Powershell on Windows hosts. Use bash on Linux/macOS hosts.
+
 Recommended commands (run from repository root):
 
-```bash
+```text
 # Install dependencies for both extensions:
 npm install
 # Build both extensions:
-npm run build
+npm run compile
 # Development watch (extension build):
 npm run watch
 # Create a packaged extension (.vsix)

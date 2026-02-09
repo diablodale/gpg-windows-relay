@@ -9,11 +9,10 @@
 		],
 		"sourceMap": true,
 		"skipLibCheck": true,
-		"strict": true
+		"strict": true,
+		"declaration": true,
+		"declarationMap": true
 	},
 	"include": ["src/**/*"],
-	"exclude": ["node_modules", "out"],
-	"references": [
-		{ "path": "../shared/tsconfig.json" }
-	]
+	"exclude": ["node_modules", "out"]
 }

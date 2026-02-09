@@ -4,7 +4,7 @@
  */
 
 import * as vscode from 'vscode';
-import type { ICommandExecutor } from '../../../shared/types';
+import type { ICommandExecutor } from '@gpg-relay/shared';
 
 /**
  * Production implementation that executes VS Code commands to communicate with agent-proxy.

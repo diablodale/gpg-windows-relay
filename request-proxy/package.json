@@ -9,7 +9,8 @@
     "url": "https://github.com/diablodale/gpg-windows-relay"
   },
   "engines": {
-    "vscode": "^1.108.1"
+    "vscode": "^1.108.1",
+    "node": ">=20.0.0"
   },
   "extensionKind": [
     "workspace"
@@ -51,6 +52,9 @@
     "lint": "eslint src",
     "test": "vscode-test",
     "package": "vsce package"
+  },
+  "dependencies": {
+    "@gpg-relay/shared": "file:../shared"
   },
   "devDependencies": {
     "@types/chai": "^4.3.20",

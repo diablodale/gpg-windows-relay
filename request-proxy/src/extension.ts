@@ -11,9 +11,9 @@
 
 import * as vscode from 'vscode';
 import { startRequestProxy } from './services/requestProxy';
-import { extractErrorMessage } from '../../shared/protocol';
+import { extractErrorMessage } from '@gpg-relay/shared';
 import { VSCodeCommandExecutor } from './services/commandExecutor';
-import { isTestEnvironment } from '../../shared/environment';
+import { isTestEnvironment } from '@gpg-relay/shared';
 
 let requestProxyInstance: Awaited<ReturnType<typeof startRequestProxy>> | null = null;
 

@@ -9,7 +9,8 @@
     "url": "https://github.com/diablodale/gpg-windows-relay"
   },
   "engines": {
-    "vscode": "^1.108.1"
+    "vscode": "^1.108.1",
+    "node": ">=20.0.0"
   },
   "os": [
     "win32"
@@ -70,6 +71,7 @@
     "package": "vsce package"
   },
   "dependencies": {
+    "@gpg-relay/shared": "file:../shared",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

@@ -1,0 +1,28 @@
+{
+  "name": "@gpg-relay/shared",
+  "version": "1.0.0",
+  "description": "Shared code for GPG relay extensions",
+  "main": "out/index.js",
+  "types": "out/index.d.ts",
+  "files": [
+    "out"
+  ],
+  "exports": {
+    ".": {
+      "types": "./out/index.d.ts",
+      "default": "./out/index.js"
+    },
+    "./test": {
+      "types": "./out/test/helpers.d.ts",
+      "default": "./out/test/helpers.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "keywords": [
+    "gpg",
+    "assuan",
+    "protocol"
+  ]
+}

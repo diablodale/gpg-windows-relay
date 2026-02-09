@@ -1,7 +1,9 @@
 .vscode-test/
 out
-dist
 node_modules
 *.vsix
 **/*.map
 **/*.tsbuildinfo
+
+# all source should be typescript
+*/src/**/*.js

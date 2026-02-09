@@ -11,8 +11,8 @@
 import * as net from 'net';
 import * as fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { log, decodeProtocolData, parseSocketFile, extractErrorMessage, sanitizeForLog } from '../../../shared/protocol';
-import type { LogConfig, IFileSystem, ISocketFactory } from '../../../shared/types';
+import { log, decodeProtocolData, parseSocketFile, extractErrorMessage, sanitizeForLog } from '@gpg-relay/shared';
+import type { LogConfig, IFileSystem, ISocketFactory } from '@gpg-relay/shared';
 
 export interface AgentProxyConfig extends LogConfig {
     gpgAgentSocketPath: string; // Path to Assuan socket file
