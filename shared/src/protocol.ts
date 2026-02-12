@@ -134,6 +134,15 @@ export interface CommandExtraction {
     remaining: string;
 }
 
+/**
+ * Extract the next complete command from the buffer based on the current state.
+ * In SEND_COMMAND state, looks for a single line ending with \n.
+ * In INQUIRE_DATA state, looks for D lines followed by END\n.
+ *
+ * @param buffer Accumulated input buffer
+ * @param state Current state machine state
+ * @returns Object with extracted command (or null if incomplete) and remaining buffer
+ */
 export function extractNextCommand(buffer: string, state: ClientState): CommandExtraction {
     if (state === 'SEND_COMMAND') {
         // Look for newline to delimit one complete command
