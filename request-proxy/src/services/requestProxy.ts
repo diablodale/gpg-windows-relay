@@ -27,7 +27,7 @@ import { VSCodeCommandExecutor } from './commandExecutor';
 /**
  * Client session states (12 total)
  */
-type ClientState = 
+type ClientState =
   | 'DISCONNECTED'
   | 'CLIENT_CONNECTED'
   | 'AGENT_CONNECTING'
@@ -45,7 +45,7 @@ type ClientState =
 /**
  * State machine events (21 total)
  */
-type StateEvent = 
+type StateEvent =
   | { type: 'CLIENT_SOCKET_CONNECTED' }
   | { type: 'START_AGENT_CONNECT' }
   | { type: 'AGENT_GREETING_OK'; greeting: string }
@@ -72,7 +72,7 @@ type StateEvent =
 /**
  * State handler function type
  */
-type StateHandler = (config: RequestProxyConfig, session: ClientSession, event: StateEvent) => Promise<ClientState>;
+type StateHandler = (config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent) => Promise<ClientState>;
 
 /**
  * Transition table: (state, event type) → next state
@@ -155,9 +155,364 @@ interface ClientSession {
 }
 
 // ============================================================================
-// Phase 2: State Handlers (TO BE IMPLEMENTED)
+// Phase 2: State Handlers
 // ============================================================================
-// Handler implementations will be added in Phase 2
+
+/**
+ * Handler for DISCONNECTED state
+ * No valid events in this state. Stay disconnected until socket reconnects.
+ */
+async function handleDisconnected(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    log(config, `[${session.sessionId ?? 'pending'}] Received event ${event.type} in DISCONNECTED state (invalid)`);
+    return 'DISCONNECTED';
+}
+
+/**
+ * Handler for CLIENT_CONNECTED state
+ * Only accepts CLIENT_SOCKET_CONNECTED event (already handled by server).
+ * Transition to AGENT_CONNECTING to start agent connection.
+ */
+async function handleClientConnected(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'CLIENT_SOCKET_CONNECTED') {
+        log(config, `[${session.sessionId ?? 'pending'}] Client connected, initiating agent connection...`);
+        return 'AGENT_CONNECTING';
+    }
+    log(config, `[${session.sessionId ?? 'pending'}] Unexpected event ${event.type} in CLIENT_CONNECTED state`);
+    return 'ERROR';
+}
+
+/**
+ * Handler for AGENT_CONNECTING state
+ * Processes connection result: success (READY) or error (ERROR).
+ * Side effect: Calls connectToAgent() via command executor.
+ */
+async function handleAgentConnecting(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'START_AGENT_CONNECT') {
+        // Transition: initiate connection to agent-proxy
+        log(config, `[${session.sessionId ?? 'pending'}] Connecting to GPG Agent Proxy...`);
+        try {
+            const result = await commandExecutor.connectAgent();
+            session.sessionId = result.sessionId;
+            log(config, `[${session.sessionId}] Connected to GPG Agent Proxy`);
+
+            if (result.greeting) {
+                writeToClient(config, session, result.greeting, 'Ready for client data');
+            }
+            return 'READY';
+        } catch (err) {
+            const msg = extractErrorMessage(err);
+            log(config, `[${session.sessionId}] Failed to connect to GPG Agent Proxy: ${msg}`);
+            return 'ERROR';
+        }
+    }
+    return 'ERROR';
+}
+
+/**
+ * Handler for READY state
+ * Accepts CLIENT_DATA_START event and transitions to BUFFERING_COMMAND.
+ * Buffers incoming data and checks for complete command.
+ */
+async function handleReady(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'CLIENT_DATA_START') {
+        const chunk = (event as any).data as Buffer;
+        session.buffer += decodeProtocolData(chunk);
+        log(config, `[${session.sessionId}] Received ${chunk.length} bytes, buffer size: ${session.buffer.length}`);
+
+        // Check if complete command (ends with \n)
+        const newlineIndex = session.buffer.indexOf('\n');
+        if (newlineIndex !== -1) {
+            // Command complete, ready to dispatch
+            log(config, `[${session.sessionId}] Command complete: ${sanitizeForLog(session.buffer.substring(0, newlineIndex + 1))}`);
+            return 'DATA_READY';
+        }
+
+        // Command incomplete, continue buffering
+        log(config, `[${session.sessionId}] Buffering command...`);
+        return 'BUFFERING_COMMAND';
+    }
+    return 'ERROR';
+}
+
+/**
+ * Handler for BUFFERING_COMMAND state
+ * Continues buffering client data until complete command (\n).
+ */
+async function handleBufferingCommand(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'CLIENT_DATA_PARTIAL') {
+        const chunk = (event as any).data as Buffer;
+        session.buffer += decodeProtocolData(chunk);
+        log(config, `[${session.sessionId}] Buffering command, received ${chunk.length} bytes, total: ${session.buffer.length}`);
+
+        // Check if command is now complete
+        const newlineIndex = session.buffer.indexOf('\n');
+        if (newlineIndex !== -1) {
+            log(config, `[${session.sessionId}] Command complete: ${sanitizeForLog(session.buffer.substring(0, newlineIndex + 1))}`);
+            return 'DATA_READY';
+        }
+        return 'BUFFERING_COMMAND';
+    } else if (event.type === 'BUFFER_ERROR') {
+        const error = (event as any).error as string;
+        log(config, `[${session.sessionId}] Buffer error: ${error}`);
+        return 'ERROR';
+    }
+    return 'ERROR';
+}
+
+/**
+ * Handler for BUFFERING_INQUIRE state
+ * Buffers inquire response data (D lines) until complete (END\n).
+ */
+async function handleBufferingInquire(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'INQUIRE_DATA_PARTIAL') {
+        const chunk = (event as any).data as Buffer;
+        session.buffer += decodeProtocolData(chunk);
+        log(config, `[${session.sessionId}] Buffering inquire data, received ${chunk.length} bytes, total: ${session.buffer.length}`);
+
+        // Check if D-block is complete (ends with END\n)
+        const endIndex = session.buffer.indexOf('END\n');
+        if (endIndex !== -1) {
+            log(config, `[${session.sessionId}] Inquire data complete`);
+            return 'DATA_READY';
+        }
+        return 'BUFFERING_INQUIRE';
+    } else if (event.type === 'BUFFER_ERROR') {
+        const error = (event as any).error as string;
+        log(config, `[${session.sessionId}] Buffer error: ${error}`);
+        return 'ERROR';
+    }
+    return 'ERROR';
+}
+
+/**
+ * Handler for DATA_READY state
+ * Sends buffered command/inquire data to agent-proxy via VS Code command.
+ * Processes response and transitions to BUFFERING_INQUIRE or READY.
+ */
+async function handleDataReady(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'DISPATCH_DATA') {
+        const data = session.buffer;
+        if (!data || data.length === 0) {
+            log(config, `[${session.sessionId}] No data to dispatch`);
+            return 'READY';
+        }
+
+        log(config, `[${session.sessionId}] Dispatching to agent: ${sanitizeForLog(data)}`);
+        try {
+            const result = await commandExecutor.sendCommands(session.sessionId!, data);
+            const response = result.response;
+
+            writeToClient(config, session, response, `Proxying agent response: ${sanitizeForLog(response)}`);
+
+            // Clear sent command from buffer
+            session.buffer = '';
+
+            // Check if response contains INQUIRE (next state depends on response type)
+            if (/(^|\n)INQUIRE/.test(response)) {
+                log(config, `[${session.sessionId}] Response contains INQUIRE, waiting for client data`);
+                return 'BUFFERING_INQUIRE';
+            }
+
+            log(config, `[${session.sessionId}] Response OK/ERR, ready for next command`);
+
+            // If client sent pipelined data while we were waiting, process buffered data
+            if (session.buffer.length > 0) {
+                const newlineIndex = session.buffer.indexOf('\n');
+                if (newlineIndex !== -1) {
+                    return 'DATA_READY';
+                }
+                return 'BUFFERING_COMMAND';
+            }
+            return 'READY';
+        } catch (err) {
+            const msg = extractErrorMessage(err);
+            log(config, `[${session.sessionId}] Error sending to agent: ${msg}`);
+            return 'ERROR';
+        }
+    }
+    return 'ERROR';
+}
+
+/**
+ * Handler for SENDING_TO_AGENT state
+ * Waits for write confirmation after sending to agent.
+ */
+async function handleSendingToAgent(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'WRITE_OK') {
+        log(config, `[${session.sessionId}] Write to agent OK`);
+        return 'WAITING_FOR_AGENT';
+    } else if (event.type === 'WRITE_ERROR') {
+        const error = (event as any).error as string;
+        log(config, `[${session.sessionId}] Write to agent error: ${error}`);
+        return 'ERROR';
+    }
+    return 'ERROR';
+}
+
+/**
+ * Handler for WAITING_FOR_AGENT state
+ * Waits for complete response from agent.
+ * Handles timeouts, socket errors, and pipelined client data.
+ */
+async function handleWaitingForAgent(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'AGENT_RESPONSE_COMPLETE') {
+        const response = (event as any).response as string;
+        log(config, `[${session.sessionId}] Agent response: ${sanitizeForLog(response)}`);
+        return 'SENDING_TO_CLIENT';
+    } else if (event.type === 'AGENT_TIMEOUT') {
+        log(config, `[${session.sessionId}] Agent timeout`);
+        return 'ERROR';
+    } else if (event.type === 'AGENT_SOCKET_ERROR') {
+        const error = (event as any).error as string;
+        log(config, `[${session.sessionId}] Agent socket error: ${error}`);
+        return 'ERROR';
+    } else if (event.type === 'CLIENT_DATA_DURING_WAIT') {
+        log(config, `[${session.sessionId}] Client sent data during agent wait (pipelined)`);
+        return 'ERROR';
+    }
+    return 'ERROR';
+}
+
+/**
+ * Handler for SENDING_TO_CLIENT state
+ * Sends agent response to client.
+ * Determines next state: READY (OK/ERR) or BUFFERING_INQUIRE (INQUIRE).
+ */
+async function handleSendingToClient(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'WRITE_OK') {
+        log(config, `[${session.sessionId}] Write to client OK`);
+        // Next state determined by response content (handled by previous handler)
+        // For now, default to READY; INQUIRE detection happens in WAITING_FOR_AGENT
+        return 'READY';
+    } else if (event.type === 'RESPONSE_INQUIRE') {
+        log(config, `[${session.sessionId}] Response contains INQUIRE`);
+        return 'BUFFERING_INQUIRE';
+    } else if (event.type === 'WRITE_ERROR') {
+        const error = (event as any).error as string;
+        log(config, `[${session.sessionId}] Write to client error: ${error}`);
+        return 'ERROR';
+    }
+    return 'ERROR';
+}
+
+/**
+ * Handler for ERROR state
+ * Initiates cleanup by transitioning to CLOSING.
+ */
+async function handleError(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'CLEANUP_START') {
+        log(config, `[${session.sessionId}] Starting cleanup from ERROR state`);
+        return 'CLOSING';
+    }
+    // Auto-transition to CLOSING (error handling requires cleanup)
+    log(config, `[${session.sessionId}] In ERROR state, initiating cleanup`);
+    return 'CLOSING';
+}
+
+/**
+ * Handler for CLOSING state
+ * Performs full session cleanup: socket, listeners, buffer, sessionId, etc.
+ * On success: DISCONNECTED
+ * On failure: FATAL (breaks error loop)
+ */
+async function handleClosing(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    if (event.type === 'CLEANUP_COMPLETE' || event.type === 'CLEANUP_START') {
+        // Perform cleanup
+        log(config, `[${session.sessionId}] Closing session and releasing resources...`);
+
+        if (session.sessionId) {
+            try {
+                await commandExecutor.disconnectAgent(session.sessionId);
+                log(config, `[${session.sessionId}] Disconnected from GPG Agent Proxy`);
+            } catch (err) {
+                const msg = extractErrorMessage(err);
+                log(config, `[${session.sessionId}] Disconnect failed: ${msg}`);
+                // Continue with local cleanup even if disconnect fails
+            }
+        }
+
+        // Clean up local session resources
+        try {
+            // Remove socket listeners
+            session.socket.removeAllListeners();
+            // Destroy socket
+            session.socket.destroy();
+            log(config, `[${session.sessionId}] Socket destroyed`);
+        } catch (err) {
+            const msg = extractErrorMessage(err);
+            log(config, `[${session.sessionId}] Error destroying socket: ${msg}`);
+            return 'FATAL';
+        }
+
+        // Clear session state
+        session.sessionId = null;
+        session.buffer = '';
+        log(config, `[${session.sessionId ?? 'pending'}] Session cleanup complete`);
+        return 'DISCONNECTED';
+    } else if (event.type === 'CLEANUP_ERROR') {
+        const error = (event as any).error as string;
+        log(config, `[${session.sessionId}] Cleanup error: ${error}, transitioning to FATAL`);
+        return 'FATAL';
+    }
+
+    // Unknown event in CLOSING state
+    log(config, `[${session.sessionId}] Unexpected event ${event.type} in CLOSING state, attempting cleanup`);
+    return 'CLOSING';
+}
+
+/**
+ * Handler for FATAL state
+ * Terminal state. No transitions out. Log and remain.
+ */
+async function handleFatal(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
+    log(config, `[${session.sessionId}] In FATAL state (terminal), ignoring event ${event.type}`);
+    return 'FATAL';
+}
+
+/**
+ * State handler dispatcher map
+ * O(1) direct property lookup instead of switch statement string comparisons
+ * Maps ClientState to handler function
+ */
+const stateHandlers: Record<ClientState, StateHandler> = {
+    DISCONNECTED: handleDisconnected,
+    CLIENT_CONNECTED: handleClientConnected,
+    AGENT_CONNECTING: handleAgentConnecting,
+    READY: handleReady,
+    BUFFERING_COMMAND: handleBufferingCommand,
+    BUFFERING_INQUIRE: handleBufferingInquire,
+    DATA_READY: handleDataReady,
+    SENDING_TO_AGENT: handleSendingToAgent,
+    WAITING_FOR_AGENT: handleWaitingForAgent,
+    SENDING_TO_CLIENT: handleSendingToClient,
+    ERROR: handleError,
+    CLOSING: handleClosing,
+    FATAL: handleFatal,
+};
+
+/**
+ * State handler dispatcher
+ * Routes events to appropriate handler based on current state
+ * Uses O(1) object property lookup instead of switch statement
+ */
+async function dispatchStateEvent(config: RequestProxyConfig, commandExecutor: ICommandExecutor, session: ClientSession, event: StateEvent): Promise<void> {
+    const previousState = session.state;
+
+    try {
+        const handler = stateHandlers[previousState];
+        const nextState = await handler(config, commandExecutor, session, event);
+
+        // Update state
+        if (nextState !== previousState) {
+            session.state = nextState;
+            log(config, `[${session.sessionId ?? 'pending'}] ${previousState} --[${event.type}]--> ${nextState}`);
+        }
+    } catch (err) {
+        const msg = extractErrorMessage(err);
+        log(config, `[${session.sessionId}] Handler error in ${previousState}: ${msg}`);
+        session.state = 'ERROR';
+    }
+}
 
 /**
  * Start the Request Proxy
@@ -336,7 +691,7 @@ async function handleClientData(config: RequestProxyConfig, commandExecutor: ICo
     // TODO: Reimplement in Phase 2/4 with state handlers
     // Extract command based on current state
     let command: string | null = null;
-    
+
     if (session.state === 'READY' || session.state === 'BUFFERING_COMMAND') {
         const newlineIndex = session.buffer.indexOf('\n');
         if (newlineIndex !== -1) {

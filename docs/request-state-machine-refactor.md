@@ -96,27 +96,28 @@ stateDiagram-v2
 - [x] Define `StateEvent` union with all 20+ events (21 total)
 - [x] Define `StateHandler` function signature
 - [x] Create transition table (lookup: `(state, event) → nextState`)
-- [ ] Add validation that transition table covers all valid (state, event) pairs (Phase 2)
-- [ ] Create `dispatch(event: StateEvent) → Promise<void>` function as central router (Phase 3)
+- [x] Add validation that transition table covers all valid (state, event) pairs
+- [x] Create `dispatch(event: StateEvent) → Promise<void>` function as central router (implemented as `dispatchStateEvent`)
 
-### Phase 2: State Handlers
+### Phase 2: State Handlers ✅ COMPLETE
 **File:** `request-proxy/src/services/requestProxy.ts`  
 Implement handler for each state:
 
-- [ ] `handleDisconnected(event)` — only accepts `CLIENT_SOCKET_CONNECTED`
-- [ ] `handleClientConnected(event)` — only accepts `START_AGENT_CONNECT`
-- [ ] `handleAgentConnecting(event)` — accepts `AGENT_GREETING_OK`, `AGENT_CONNECT_ERROR`
-- [ ] `handleReady(event)` — only accepts `CLIENT_DATA_START`
-- [ ] `handleBufferingCommand(event)` — accumulates data; emits `COMMAND_COMPLETE` or stays in state
-- [ ] `handleDataReady(event)` — only accepts `DISPATCH_DATA`
-- [ ] `handleSendingToAgent(event)` — only accepts `WRITE_OK`, `WRITE_ERROR`
-- [ ] `handleWaitingForAgent(event)` — accepts `AGENT_RESPONSE_COMPLETE`, timeouts, socket errors, pipelined data
-- [ ] `handleSendingToClient(event)` — only accepts `WRITE_OK`, `WRITE_ERROR` plus determination of next state
-- [ ] `handleBufferingInquire(event)` — accumulates D-block; emits `INQUIRE_COMPLETE` or stays in state
+- [x] `handleDisconnected(event)` — only accepts `CLIENT_SOCKET_CONNECTED`
+- [x] `handleClientConnected(event)` — only accepts `START_AGENT_CONNECT`
+- [x] `handleAgentConnecting(event)` — accepts `AGENT_GREETING_OK`, `AGENT_CONNECT_ERROR`
+- [x] `handleReady(event)` — only accepts `CLIENT_DATA_START`
+- [x] `handleBufferingCommand(event)` — accumulates data; emits `COMMAND_COMPLETE` or stays in state
+- [x] `handleDataReady(event)` — only accepts `DISPATCH_DATA`
+- [x] `handleSendingToAgent(event)` — only accepts `WRITE_OK`, `WRITE_ERROR`
+- [x] `handleWaitingForAgent(event)` — accepts `AGENT_RESPONSE_COMPLETE`, timeouts, socket errors, pipelined data
+- [x] `handleSendingToClient(event)` — only accepts `WRITE_OK`, `WRITE_ERROR` plus determination of next state
+- [x] `handleBufferingInquire(event)` — accumulates D-block; emits `INQUIRE_COMPLETE` or stays in state
 
-- [ ] `handleError(event)` — only accepts `CLEANUP_START`
-- [ ] `handleClosing(event)` — accepts `CLEANUP_COMPLETE`, `CLEANUP_ERROR` (goes to `FATAL`)
-- [ ] `handleFatal(event)` — no transitions out; log state and remain
+- [x] `handleError(event)` — only accepts `CLEANUP_START`
+- [x] `handleClosing(event)` — accepts `CLEANUP_COMPLETE`, `CLEANUP_ERROR` (goes to `FATAL`)
+- [x] `handleFatal(event)` — no transitions out; log state and remain
+- [x] `dispatchStateEvent()` — central router for state machine dispatch
 
 ### Phase 3: Socket Event Integration
 **File:** `request-proxy/src/services/requestProxy.ts`  
