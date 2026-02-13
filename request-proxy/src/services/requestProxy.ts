@@ -16,7 +16,7 @@ import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
-import { log, encodeProtocolData, decodeProtocolData, sanitizeForLog, extractErrorMessage, extractNextCommand, determineNextState } from '@gpg-relay/shared';
+import { log, encodeProtocolData, decodeProtocolData, sanitizeForLog, extractErrorMessage } from '@gpg-relay/shared';
 import type { LogConfig, ICommandExecutor, IFileSystem, IServerFactory } from '@gpg-relay/shared';
 import { VSCodeCommandExecutor } from './commandExecutor';
 
@@ -216,6 +216,7 @@ async function handleAgentConnecting(config: RequestProxyConfigWithExecutor, ses
  * Accepts CLIENT_DATA_START event and transitions to BUFFERING_COMMAND.
  * Buffers incoming data and checks for complete command.
  * Phase 3: Directly processes complete data using processCompleteData helper.
+ * Phase 4: Uses extractFromBuffer helper for cleaner buffer management.
  */
 async function handleReady(config: RequestProxyConfigWithExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
     if (event.type === 'CLIENT_DATA_START') {
@@ -224,11 +225,34 @@ async function handleReady(config: RequestProxyConfigWithExecutor, session: Clie
         log(config, `[${session.sessionId}] Received ${chunk.length} bytes, buffer size: ${session.buffer.length}`);
 
         // Check if complete command (ends with \n)
-        const newlineIndex = session.buffer.indexOf('\n');
-        if (newlineIndex !== -1) {
+        const { extracted, remaining } = extractFromBuffer(session.buffer, '\n');
+        if (extracted !== null) {
             // Command complete, process it directly
-            log(config, `[${session.sessionId}] Command complete: ${sanitizeForLog(session.buffer.substring(0, newlineIndex + 1))}`);
-            return processCompleteData(config, session);
+            log(config, `[${session.sessionId}] Command complete: ${sanitizeForLog(extracted)}`);
+            // Set buffer to extracted command, save remaining for after processing
+            session.buffer = extracted;
+            const nextState = await processCompleteData(config, session);
+            // Prepend any remaining data back to buffer (for pipelined commands)
+            session.buffer = remaining + session.buffer;
+
+            // Keep processing pipelined commands until no more complete commands in buffer
+            let currentState = nextState;
+            while (currentState === 'READY' && session.buffer.length > 0) {
+                const { extracted: nextCmd, remaining: nextRemaining } = extractFromBuffer(session.buffer, '\n');
+                if (nextCmd !== null) {
+                    // Have another complete command in buffer, extract and process it
+                    log(config, `[${session.sessionId}] Processing pipelined command from buffer`);
+                    session.buffer = nextCmd;
+                    currentState = await processCompleteData(config, session);
+                    // Restore any further remaining data
+                    session.buffer = nextRemaining + session.buffer;
+                } else {
+                    // Have partial data, need more input
+                    return 'BUFFERING_COMMAND';
+                }
+            }
+
+            return currentState;
         }
 
         // Command incomplete, continue buffering
@@ -242,6 +266,7 @@ async function handleReady(config: RequestProxyConfigWithExecutor, session: Clie
  * Handler for BUFFERING_COMMAND state
  * Continues buffering client data until complete command (\n).
  * Phase 3: Directly processes complete data using processCompleteData helper.
+ * Phase 4: Uses extractFromBuffer helper for cleaner buffer management.
  */
 async function handleBufferingCommand(config: RequestProxyConfigWithExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
     if (event.type === 'CLIENT_DATA_PARTIAL') {
@@ -250,10 +275,33 @@ async function handleBufferingCommand(config: RequestProxyConfigWithExecutor, se
         log(config, `[${session.sessionId}] Buffering command, received ${chunk.length} bytes, total: ${session.buffer.length}`);
 
         // Check if command is now complete
-        const newlineIndex = session.buffer.indexOf('\n');
-        if (newlineIndex !== -1) {
-            log(config, `[${session.sessionId}] Command complete: ${sanitizeForLog(session.buffer.substring(0, newlineIndex + 1))}`);
-            return processCompleteData(config, session);
+        const { extracted, remaining } = extractFromBuffer(session.buffer, '\n');
+        if (extracted !== null) {
+            log(config, `[${session.sessionId}] Command complete: ${sanitizeForLog(extracted)}`);
+            // Set buffer to extracted command, save remaining for after processing
+            session.buffer = extracted;
+            const nextState = await processCompleteData(config, session);
+            // Prepend any remaining data back to buffer (for pipelined commands)
+            session.buffer = remaining + session.buffer;
+
+            // Keep processing pipelined commands until no more complete commands in buffer
+            let currentState = nextState;
+            while (currentState === 'READY' && session.buffer.length > 0) {
+                const { extracted: nextCmd, remaining: nextRemaining } = extractFromBuffer(session.buffer, '\n');
+                if (nextCmd !== null) {
+                    // Have another complete command in buffer, extract and process it
+                    log(config, `[${session.sessionId}] Processing pipelined command from buffer`);
+                    session.buffer = nextCmd;
+                    currentState = await processCompleteData(config, session);
+                    // Restore any further remaining data
+                    session.buffer = nextRemaining + session.buffer;
+                } else {
+                    // Have partial data, stay buffering
+                    return 'BUFFERING_COMMAND';
+                }
+            }
+
+            return currentState;
         }
         return 'BUFFERING_COMMAND';
     } else if (event.type === 'BUFFER_ERROR') {
@@ -268,6 +316,7 @@ async function handleBufferingCommand(config: RequestProxyConfigWithExecutor, se
  * Handler for BUFFERING_INQUIRE state
  * Buffers inquire response data (D lines) until complete (END\n).
  * Phase 3: Directly processes complete data using processCompleteData helper.
+ * Phase 4: Uses extractFromBuffer helper for cleaner buffer management.
  */
 async function handleBufferingInquire(config: RequestProxyConfigWithExecutor, session: ClientSession, event: StateEvent): Promise<ClientState> {
     if (event.type === 'INQUIRE_DATA_START' || event.type === 'INQUIRE_DATA_PARTIAL') {
@@ -276,10 +325,15 @@ async function handleBufferingInquire(config: RequestProxyConfigWithExecutor, se
         log(config, `[${session.sessionId}] Buffering inquire data, received ${chunk.length} bytes, total: ${session.buffer.length}`);
 
         // Check if D-block is complete (ends with END\n)
-        const endIndex = session.buffer.indexOf('END\n');
-        if (endIndex !== -1) {
+        const { extracted, remaining } = extractFromBuffer(session.buffer, 'END\n');
+        if (extracted !== null) {
             log(config, `[${session.sessionId}] Inquire data complete`);
-            return processCompleteData(config, session);
+            // Set buffer to extracted D-block, save remaining for after processing
+            session.buffer = extracted;
+            const nextState = await processCompleteData(config, session);
+            // Prepend any remaining data back to buffer (for pipelined commands)
+            session.buffer = remaining + session.buffer;
+            return nextState;
         }
         return 'BUFFERING_INQUIRE';
     } else if (event.type === 'BUFFER_ERROR') {
@@ -445,6 +499,31 @@ const stateHandlers: Record<ClientState, StateHandler> = {
     CLOSING: handleClosing,
     FATAL: handleFatal,
 };
+
+/**
+ * Helper function to extract data from buffer based on delimiter
+ * Phase 4: Shared buffer extraction logic to avoid duplication
+ *
+ * @param buffer - Current buffer string
+ * @param delimiter - Delimiter to search for ('\n' for commands, 'END\n' for inquire)
+ * @returns Object with extracted data (including delimiter) and remaining buffer
+ *          - extracted: null if delimiter not found, otherwise the extracted string (including delimiter)
+ *          - remaining: empty string if delimiter not found, otherwise the rest of the buffer
+ */
+function extractFromBuffer(buffer: string, delimiter: string): { extracted: string | null; remaining: string } {
+    const delimiterIndex = buffer.indexOf(delimiter);
+
+    if (delimiterIndex === -1) {
+        // Delimiter not found - data is incomplete
+        return { extracted: null, remaining: '' };
+    }
+
+    // Extract data including delimiter
+    const extracted = buffer.substring(0, delimiterIndex + delimiter.length);
+    const remaining = buffer.substring(delimiterIndex + delimiter.length);
+
+    return { extracted, remaining };
+}
 
 /**
  * Helper function to process complete command/inquire data
