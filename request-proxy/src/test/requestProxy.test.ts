@@ -203,7 +203,7 @@ describe('RequestProxy', () => {
     });
 
     describe('state machine: WAIT_RESPONSE', () => {
-        it('should send client command to agent via executeCommand', async () => {
+        it('should send client command to agent via sendCommands', async () => {
             mockCommandExecutor.connectAgentResponse = {
                 sessionId: 'test-123',
                 greeting: 'OK GPG-Agent 2.2.19\n'
@@ -220,7 +220,13 @@ describe('RequestProxy', () => {
 
             await new Promise((resolve) => setTimeout(resolve, 20));
 
-            expect(mockCommandExecutor.getCallCount('connectAgent')).to.be.greaterThan(0);
+            // Send a command from client
+            clientSocket.simulateDataReceived(Buffer.from('GETINFO version\n', 'latin1'));
+
+            await new Promise((resolve) => setTimeout(resolve, 10));
+
+            // Verify command was sent to agent
+            expect(mockCommandExecutor.getCallCount('sendCommands')).to.be.greaterThan(0);
 
             await instance.stop();
         });
@@ -246,8 +252,8 @@ describe('RequestProxy', () => {
         });
     });
 
-    describe('state machine: INQUIRE_DATA', () => {
-        it('should recognize INQUIRE response and transition to INQUIRE_DATA', async () => {
+    describe('state machine: BUFFERING_INQUIRE', () => {
+        it('should recognize INQUIRE response and transition to BUFFERING_INQUIRE', async () => {
             mockCommandExecutor.connectAgentResponse = {
                 sessionId: 'test-123',
                 greeting: 'OK GPG-Agent 2.2.19\n'
@@ -263,6 +269,15 @@ describe('RequestProxy', () => {
             const clientSocket = server.simulateClientConnection();
 
             await new Promise((resolve) => setTimeout(resolve, 20));
+
+            // Send command that triggers INQUIRE
+            clientSocket.simulateDataReceived(Buffer.from('SETKEY keyid\n', 'latin1'));
+
+            await new Promise((resolve) => setTimeout(resolve, 10));
+
+            // Verify INQUIRE was sent to client
+            const written = clientSocket.getWrittenData().toString('latin1');
+            expect(written).to.include('INQUIRE');
 
             await instance.stop();
         });
@@ -410,7 +425,7 @@ describe('RequestProxy', () => {
             await instance.stop();
         });
 
-        it('should handle AGENT_CONNECT_ERROR transition to ERROR state', async () => {
+        it('should handle agent connection errors and destroy socket', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Connection refused'));
 
             const instance = await startRequestProxy(
@@ -500,7 +515,7 @@ describe('RequestProxy', () => {
             await instance.stop();
         });
 
-        it('should emit INQUIRE_DATA_START when BUFFERING_INQUIRE receives first data', async () => {
+        it('should buffer D-block data when BUFFERING_INQUIRE receives first data', async () => {
             mockCommandExecutor.connectAgentResponse = {
                 sessionId: 'test-session',
                 greeting: 'OK GPG-Agent\n'
@@ -528,7 +543,7 @@ describe('RequestProxy', () => {
             expect(written).to.include('INQUIRE');
 
             // Now state should be BUFFERING_INQUIRE
-            // Send first D-block data - should trigger INQUIRE_DATA_START
+            // Send first D-block data - should buffer it (emits CLIENT_DATA_PARTIAL)
             mockCommandExecutor.setSendCommandsResponse('OK\n');
             clientSocket.simulateDataReceived(Buffer.from('D passphrase1\n', 'latin1'));
 
@@ -540,7 +555,7 @@ describe('RequestProxy', () => {
             await instance.stop();
         });
 
-        it('should emit INQUIRE_DATA_PARTIAL in BUFFERING_INQUIRE with more data', async () => {
+        it('should accumulate multiple D lines in BUFFERING_INQUIRE state', async () => {
             mockCommandExecutor.connectAgentResponse = {
                 sessionId: 'test-session',
                 greeting: 'OK GPG-Agent\n'
@@ -562,7 +577,7 @@ describe('RequestProxy', () => {
 
             await new Promise((resolve) => setTimeout(resolve, 10));
 
-            // Send multiple D lines
+            // Send multiple D lines (each emits CLIENT_DATA_PARTIAL in BUFFERING_INQUIRE)
             mockCommandExecutor.setSendCommandsResponse('OK\n');
             clientSocket.simulateDataReceived(Buffer.from('D line1\n', 'latin1'));
 
@@ -688,7 +703,7 @@ describe('RequestProxy', () => {
             await instance.stop();
         });
 
-        it('should transition to ERROR on AGENT_CONNECT_ERROR', async () => {
+        it('should transition to ERROR state when agent connection fails', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Agent unreachable'));
 
             const instance = await startRequestProxy(
@@ -737,38 +752,6 @@ describe('RequestProxy', () => {
     });
 
     describe('Phase 7a: Invalid Event Tests', () => {
-        it('should reject invalid events with descriptive error message', async () => {
-            // Invalid events are tested indirectly through error logging
-            // Direct state machine testing would require exposing internal APIs
-            // This test verifies that error handling works when invalid operations occur
-
-            mockCommandExecutor.connectAgentResponse = {
-                sessionId: 'test',
-                greeting: 'OK\n'
-            };
-
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
-
-            const server = mockServerFactory.getServers()[0];
-            const clientSocket = server.simulateClientConnection();
-
-            await new Promise((resolve) => setTimeout(resolve, 20));
-
-            // Try to send data before ready (while still connecting)
-            // This should be handled gracefully
-            clientSocket.simulateDataReceived(Buffer.from('PREMATURE\n', 'latin1'));
-
-            await new Promise((resolve) => setTimeout(resolve, 10));
-
-            // System should handle this without crashing
-            expect(mockLogConfig.getLogCount()).to.be.greaterThan(0);
-
-            await instance.stop();
-        });
-
         it('should handle socket errors during AGENT_CONNECTING', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Network error'));
 
@@ -789,7 +772,9 @@ describe('RequestProxy', () => {
         });
 
         it('should log error when client sends data in wrong state', async () => {
-            // Testing that the system handles unexpected data gracefully
+            // Testing protocol violation: client sends data while WAITING_FOR_AGENT
+            // This simulates pipelined commands before agent responds
+            // Whitelist pattern should catch this and emit ERROR_OCCURRED
 
             mockCommandExecutor.connectAgentResponse = {
                 sessionId: 'test',
@@ -804,13 +789,23 @@ describe('RequestProxy', () => {
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
 
-            // Try to trigger error by simulating socket error
-            clientSocket.emit('error', new Error('Unexpected socket error'));
+            await new Promise((resolve) => setTimeout(resolve, 20));
+
+            // Socket is now in READY state
+            // Send a command that will put us in WAITING_FOR_AGENT state
+            // Don't set a response yet, so we stay in WAITING_FOR_AGENT
+            clientSocket.simulateDataReceived(Buffer.from('GETINFO version\n', 'latin1'));
 
             await new Promise((resolve) => setTimeout(resolve, 10));
 
-            // Error should be logged
-            expect(mockLogConfig.hasLog(/error|socket/i)).to.equal(true);
+            // Now in WAITING_FOR_AGENT state (not in whitelist)
+            // Send more data - should trigger protocol violation
+            clientSocket.simulateDataReceived(Buffer.from('GETINFO pid\n', 'latin1'));
+
+            await new Promise((resolve) => setTimeout(resolve, 10));
+
+            // Should log protocol violation error
+            expect(mockLogConfig.hasLog(/Protocol violation|WAITING_FOR_AGENT/i)).to.equal(true);
 
             await instance.stop();
         });
