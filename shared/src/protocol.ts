@@ -6,7 +6,7 @@
  * This allows binary data (nonces, D blocks) to pass through string operations unchanged.
  */
 
-import { LogConfig, ClientState } from './types';
+import { LogConfig } from './types';
 
 /**
  * Encode a string to a Buffer using latin1 encoding.
@@ -117,78 +117,4 @@ export function parseSocketFile(data: Buffer): ParsedSocketFile {
     }
 
     return { port, nonce };
-}
-
-/**
- * Extract the next complete command from the input buffer.
- * Works in two states:
- * - SEND_COMMAND: Extract one line ending with \n
- * - INQUIRE_DATA: Extract D lines until END\n
- *
- * @param buffer Accumulated input buffer
- * @param state Current state machine state
- * @returns Object with extracted command (or null) and remaining buffer
- */
-export interface CommandExtraction {
-    command: string | null;
-    remaining: string;
-}
-
-/**
- * Extract the next complete command from the buffer based on the current state.
- * In SEND_COMMAND state, looks for a single line ending with \n.
- * In INQUIRE_DATA state, looks for D lines followed by END\n.
- *
- * @param buffer Accumulated input buffer
- * @param state Current state machine state
- * @returns Object with extracted command (or null if incomplete) and remaining buffer
- */
-export function extractNextCommand(buffer: string, state: ClientState): CommandExtraction {
-    if (state === 'SEND_COMMAND') {
-        // Look for newline to delimit one complete command
-        const newlineIndex = buffer.indexOf('\n');
-        if (newlineIndex === -1) {
-            // Incomplete command, wait for more data
-            return { command: null, remaining: buffer };
-        }
-
-        // Extract one command including the newline, keep the rest in buffer
-        const command = buffer.substring(0, newlineIndex + 1);
-        const remaining = buffer.substring(newlineIndex + 1);
-        return { command, remaining };
-    } else if (state === 'INQUIRE_DATA') {
-        // Look for D lines followed by END\n marker
-        const endIndex = buffer.indexOf('END\n');
-        if (endIndex === -1) {
-            // Incomplete D block, wait for more data
-            return { command: null, remaining: buffer };
-        }
-
-        // Extract D block including END\n, keep the rest in buffer
-        const command = buffer.substring(0, endIndex + 4); // "END\n" is 4 bytes
-        const remaining = buffer.substring(endIndex + 4);
-        return { command, remaining };
-    }
-
-    // Should not reach here if state is valid
-    throw new Error(`Invalid state for command extraction: ${state}`);
-}
-
-/**
- * Determine the next state based on the response received.
- * Checks if response contains an INQUIRE directive (must be at start of line per Assuan protocol).
- *
- * @param response Response string from agent
- * @param currentState Current state (for context)
- * @returns Next state: 'INQUIRE_DATA' if INQUIRE present, otherwise 'SEND_COMMAND'
- */
-export function determineNextState(response: string, currentState: ClientState): ClientState {
-    // Check if response contains INQUIRE at start of line (per Assuan protocol spec)
-    // This regex matches INQUIRE at the start of the string or after a newline
-    if (/(^|\n)INQUIRE/.test(response)) {
-        return 'INQUIRE_DATA';
-    }
-
-    // Otherwise ready for next command
-    return 'SEND_COMMAND';
 }

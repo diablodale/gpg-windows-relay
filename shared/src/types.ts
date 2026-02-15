@@ -99,12 +99,3 @@ export interface IServerFactory {
         connectionListener: (socket: net.Socket) => void
     ): net.Server;
 }
-
-/**
- * Client state machine states for request-proxy.
- * DISCONNECTED: Initial state, not yet connected to agent-proxy
- * SEND_COMMAND: Ready to receive Assuan commands from client
- * WAIT_RESPONSE: Waiting for agent response to previous command
- * INQUIRE_DATA: Collecting data for INQUIRE response (D lines + END)
- */
-export type ClientState = 'DISCONNECTED' | 'SEND_COMMAND' | 'WAIT_RESPONSE' | 'INQUIRE_DATA';

@@ -11,8 +11,6 @@ import {
     sanitizeForLog,
     extractErrorMessage,
     parseSocketFile,
-    extractNextCommand,
-    determineNextState,
 } from '../protocol';
 
 // Test helper for creating buffers
@@ -135,64 +133,6 @@ describe('Protocol Utilities', () => {
         });
     });
 
-    describe('Command Extraction', () => {
-        it('extractNextCommand extracts command in SEND_COMMAND state', () => {
-            const buffer = 'KEYINFO D27BB288411333745EE1B194FBC6162A92775BA4 - - 0 P\n';
-            const result = extractNextCommand(buffer, 'SEND_COMMAND');
-            assert.strictEqual(result.command, buffer);
-            assert.strictEqual(result.remaining, '');
-        });
-
-        it('extractNextCommand keeps remaining data after command', () => {
-            const buffer = 'KEYINFO cmd\nNEXT line\n';
-            const result = extractNextCommand(buffer, 'SEND_COMMAND');
-            assert.strictEqual(result.command, 'KEYINFO cmd\n');
-            assert.strictEqual(result.remaining, 'NEXT line\n');
-        });
-
-        it('extractNextCommand returns null when no newline found', () => {
-            const buffer = 'incomplete command';
-            const result = extractNextCommand(buffer, 'SEND_COMMAND');
-            assert.strictEqual(result.command, null);
-            assert.strictEqual(result.remaining, buffer);
-        });
-
-        it('extractNextCommand extracts inquire data in INQUIRE_DATA state', () => {
-            const buffer = 'D some data\nD more data\nEND\nOK\n';
-            const result = extractNextCommand(buffer, 'INQUIRE_DATA');
-            assert.ok(result.command, 'Command should be extracted');
-            assert.ok(result.command.includes('END\n'), 'Command should include END marker');
-            assert.strictEqual(result.remaining, 'OK\n', 'Remaining buffer should have OK response');
-        });
-    });
-
-    describe('State Determination', () => {
-        it('determineNextState: SEND_COMMAND with OK response moves to SEND_COMMAND', () => {
-            const result = determineNextState('OK\n', 'SEND_COMMAND');
-            assert.strictEqual(result, 'SEND_COMMAND');
-        });
-
-        it('determineNextState: SEND_COMMAND with INQUIRE moves to INQUIRE_DATA', () => {
-            const result = determineNextState('INQUIRE PASSPHRASE\n', 'SEND_COMMAND');
-            assert.strictEqual(result, 'INQUIRE_DATA');
-        });
-
-        it('determineNextState: WAIT_RESPONSE with OK moves to SEND_COMMAND', () => {
-            const result = determineNextState('OK\n', 'WAIT_RESPONSE');
-            assert.strictEqual(result, 'SEND_COMMAND');
-        });
-
-        it('determineNextState: INQUIRE_DATA closes with OK', () => {
-            const result = determineNextState('OK\n', 'INQUIRE_DATA');
-            assert.strictEqual(result, 'SEND_COMMAND');
-        });
-
-        it('determineNextState: ERR response stays in same state for retry', () => {
-            const result = determineNextState('ERR 123 error\n', 'SEND_COMMAND');
-            assert.strictEqual(result, 'SEND_COMMAND');
-        });
-    });
-
     describe('Binary Data Handling (GPG Agent Responses)', () => {
         it('encodeProtocolData round-trips all latin1 byte values (0-255)', () => {
             // Create a string with all 256 byte values
@@ -270,27 +210,6 @@ describe('Protocol Utilities', () => {
             assert.deepStrictEqual(recoveredSignature, signatureBytes, 'Signature bytes should be recoverable');
         });
 
-        it('handles D blocks in INQUIRE_DATA state with binary content', () => {
-            // Simulate GPG agent response with D blocks containing binary data
-            const binaryData1 = Buffer.from([0x3C, 0xDE, 0xAD, 0xBE, 0xEF]);
-            const binaryData2 = Buffer.from([0xCA, 0xFE, 0xBA, 0xBE]);
-
-            const buffer = 'D ' + binaryData1.toString('latin1') + '\n' +
-                          'D ' + binaryData2.toString('latin1') + '\n' +
-                          'END\nOK\n';
-
-            const result = extractNextCommand(buffer, 'INQUIRE_DATA');
-            assert.ok(result.command, 'Command should be extracted');
-            assert.ok(result.command.includes('END\n'), 'Should include END marker');
-
-            // Verify binary data is intact
-            assert.strictEqual(
-                result.command.indexOf(binaryData1.toString('latin1')),
-                2, // After 'D '
-                'First binary block should be present'
-            );
-        });
-
         it('handles random binary data sequences (simulating GPG output)', () => {
             // Generate pseudo-random binary data (deterministic for testing)
             const randomBytes: number[] = [];
@@ -330,17 +249,6 @@ describe('Protocol Utilities', () => {
             }
         });
 
-        it('handles command with embedded newlines in D block data', () => {
-            // Edge case: binary data containing what looks like newlines (but as raw bytes)
-            const binaryWithLF = String.fromCharCode(0xDA, 0x0A, 0xDB); // 0x0A is LF in ASCII
-            const dataBlock = 'D ' + binaryWithLF + '\nEND\n';
-
-            // The protocol uses actual newlines to delimit, but binary data should be handled
-            // This tests that binary bytes that happen to equal newline are handled correctly
-            const result = extractNextCommand(dataBlock, 'INQUIRE_DATA');
-            assert.ok(result.command, 'Should extract command even with embedded 0x0A in data');
-        });
-
         it('handles large binary responses (e.g., exported keys)', () => {
             // Simulate a large key export (1KB of binary data)
             const largeData: number[] = [];
@@ -356,161 +264,6 @@ describe('Protocol Utilities', () => {
 
             assert.strictEqual(decoded.length, response.length, 'Full length should be preserved');
             assert.strictEqual(decoded, response, 'Large binary response should survive round-trip');
-        });
-    });
-
-    describe('GPG Agent Protocol Examples', () => {
-        it('handles PKSIGN signing session (from GPG manual example)', () => {
-            // Replicate the example from https://www.gnupg.org/documentation/manuals/gnupg/Agent-PKSIGN.html
-            // This is a realistic signing workflow:
-            // 1. Client sends SIGKEY (not tested here - just context)
-            // 2. Client sends PKSIGN command
-            // 3. Agent responds with INQUIRE HASHVAL
-            // 4. Client sends hash in D blocks + END
-            // 5. Agent responds with signature in D blocks
-            // 6. Agent responds with OK
-
-            // Step 2-3: PKSIGN triggers INQUIRE from agent
-            let state = determineNextState('INQUIRE HASHVAL\n', 'SEND_COMMAND');
-            assert.strictEqual(state, 'INQUIRE_DATA', 'INQUIRE response should move to INQUIRE_DATA state');
-
-            // Step 4: Client sends hash data
-            const hashValue = 'ABCDEF012345678901234'; // From the example
-            const clientData = 'D ' + hashValue + '\nEND\n';
-
-            // Parse the hash block
-            let result = extractNextCommand(clientData, 'INQUIRE_DATA');
-            assert.ok(result.command, 'Should extract D block + END');
-            assert.ok(result.command.includes('ABCDEF0'), 'Should contain hash value');
-            assert.ok(result.command.includes('END\n'), 'Should include END marker');
-
-            // After END, remaining should be empty (all consumed)
-            assert.strictEqual(result.remaining, '', 'All data should be consumed after END');
-
-            // After client sends END, we're back in SEND_COMMAND state
-            state = determineNextState('OK', 'INQUIRE_DATA');
-            assert.strictEqual(state, 'SEND_COMMAND', 'After END, state returns to SEND_COMMAND');
-
-            // Step 5-6: Agent responds with signature data
-            // The agent-proxy buffers all data until receiving OK
-            // Format doesn't matter - could be single D line with embedded newlines,
-            // or multiple D lines - proxy just buffers until OK
-            const signatureResponse = 'D (sig-val rsa\nD (s 45435453654612121212))\nOK\n';
-
-            // The important part: we can extract the final OK response
-            // Everything before OK is the signature data to forward
-            const lines = signatureResponse.split('\n');
-            const okLine = lines[lines.length - 2] + '\n'; // "OK\n"
-            assert.strictEqual(okLine, 'OK\n', 'Should receive OK terminating the response');
-
-            // Verify the signature data is present (everything before OK)
-            assert.ok(signatureResponse.includes('sig-val'), 'Response contains signature');
-            assert.ok(signatureResponse.includes('45435453654612121212'), 'Response contains signature value');
-        });
-
-        it('handles PKSIGN with realistic binary signature data (RSA 2048)', () => {
-            // Real RSA 2048 signature is ~256 bytes binary
-            // The S-expression wrapper adds overhead
-            const rsaSignatureBytes = Buffer.from([
-                0x30, 0x82, 0x01, 0x00, // SEQUENCE, length 256
-                0x78, 0x9C, 0x9D, 0xC0, // Some random signature bytes (deterministic)
-                0x01, 0x0D, 0x58, 0x00, 0xC0, 0x03, 0x0C, 0x0C,
-                0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C,
-                0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C,
-                0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C,
-                0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C,
-                0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C
-            ]);
-
-            // Format as agent response: D <binary>\n
-            const signatureData = 'D ' + rsaSignatureBytes.toString('latin1') + '\n';
-
-            // Should handle binary signature data intact
-            const encoded = encodeProtocolData(signatureData);
-            const decoded = decodeProtocolData(encoded);
-
-            assert.strictEqual(decoded, signatureData, 'RSA signature bytes should round-trip');
-
-            // Agent sends signature in SEND_COMMAND state (D line followed by OK)
-            const agentResponse = signatureData + 'OK\n';
-            const result = extractNextCommand(agentResponse, 'SEND_COMMAND');
-
-            // In SEND_COMMAND, extractNextCommand gets one line (the D line)
-            assert.ok(result.command, 'Should extract D line');
-            assert.strictEqual(result.remaining, 'OK\n', 'Should have OK remaining');
-            assert.deepStrictEqual(
-                Buffer.from(result.command || '', 'latin1'),
-                Buffer.concat([
-                    Buffer.from('D ', 'latin1'),
-                    rsaSignatureBytes,
-                    Buffer.from('\n', 'latin1')
-                ]),
-                'Binary signature should be preserved exactly'
-            );
-        });
-
-        it('handles PKSIGN with multi-block hash input', () => {
-            // For very large hashes or when data arrives in multiple chunks
-            const hashBlock1 = 'D ' + String.fromCharCode(0x00, 0x01, 0x02, 0x03) + '\n';
-            const hashBlock2 = 'D ' + String.fromCharCode(0x04, 0x05, 0x06, 0x07) + '\n';
-            const hashEnd = 'END\n';
-
-            const clientData = hashBlock1 + hashBlock2 + hashEnd;
-
-            // In INQUIRE_DATA state, extractNextCommand gets everything up to END\n
-            const result = extractNextCommand(clientData, 'INQUIRE_DATA');
-            assert.ok(result.command, 'Should extract all D blocks through END');
-            assert.ok(result.command.includes('END\n'), 'Should include END marker');
-        });
-
-        it('handles PKSIGN error response during signature phase', () => {
-            // If something goes wrong during signing, agent returns ERR
-            const errorResponse = 'ERR 100663404 No passphrase provided\n';
-
-            const state = determineNextState(errorResponse, 'INQUIRE_DATA');
-
-            // ERR response doesn't contain INQUIRE, so moves back to SEND_COMMAND state
-            assert.strictEqual(state, 'SEND_COMMAND', 'ERR response moves to SEND_COMMAND state');
-        });
-
-        it('handles PKSIGN with SETHASH/SHA256 workflow', () => {
-            // Realistic workflow: SETHASH --hash=sha256 <digest>, then PKSIGN
-            const sha256Digest = 'E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855';
-
-            // Client sends hash via SETHASH
-            const setHashCmd = 'SETHASH --hash=sha256 ' + sha256Digest;
-            let result = extractNextCommand(setHashCmd + '\n', 'SEND_COMMAND');
-
-            assert.strictEqual(result.command, setHashCmd + '\n');
-            assert.strictEqual(result.remaining, '');
-
-            // Then client sends PKSIGN
-            // Agent responds with INQUIRE HASHVAL
-            let currentState: any = 'SEND_COMMAND';
-            currentState = determineNextState('INQUIRE HASHVAL\n', currentState);
-            assert.strictEqual(currentState, 'INQUIRE_DATA');
-
-            // Client responds with END (hash already provided via SETHASH)
-            result = extractNextCommand('END\n', 'INQUIRE_DATA');
-            assert.strictEqual(result.command, 'END\n', 'Should extract END marker');
-
-            // Agent sends OK (back in SEND_COMMAND state)
-            currentState = determineNextState('OK\n', 'INQUIRE_DATA');
-            assert.strictEqual(currentState, 'SEND_COMMAND', 'OK after INQUIRE returns to SEND_COMMAND');
-        });
-
-        it('handles PKSIGN with UTF-8 error messages', () => {
-            // Agent might include descriptive error messages (though usually ASCII)
-            // Test unicode handling in error responses
-            const errorWithUTF8 = 'ERR 100663404 Operation cancelled by user.\n';
-
-            const encoded = encodeProtocolData(errorWithUTF8);
-            const decoded = decodeProtocolData(encoded);
-
-            assert.strictEqual(decoded, errorWithUTF8, 'Error message should round-trip');
-
-            const state = determineNextState(errorWithUTF8, 'INQUIRE_DATA');
-            assert.strictEqual(state, 'SEND_COMMAND', 'ERR response moves to SEND_COMMAND state');
         });
     });
 });

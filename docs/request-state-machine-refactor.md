@@ -436,18 +436,20 @@ Then in the state handlers:
 ### Phase 8: Cleanup
 **Files:** `shared/src/protocol.ts`, `shared/src/test/protocol.test.ts`
 
-- [ ] Check if `extractNextCommand()` is used elsewhere (agent-proxy, other extensions)
-- [ ] Check if `determineNextState()` is used elsewhere
-- [ ] If unused, mark as deprecated or remove entirely
-- [ ] If used elsewhere, keep and ensure tests remain valid
-- [ ] Remove import of these helpers from `request-proxy`
+- [x] Check if `extractNextCommand()` is used elsewhere (agent-proxy, other extensions) — **Not used**
+- [x] Check if `determineNextState()` is used elsewhere — **Not used**
+- [x] If unused, mark as deprecated or remove entirely — **Removed from shared package**
+- [x] If used elsewhere, keep and ensure tests remain valid — **N/A (not used)**
+- [x] Remove import of these helpers from `request-proxy` — **Already removed in Phase 4**
+
+**Summary:** Removed `extractNextCommand()`, `determineNextState()`, and `CommandExtraction` interface from `shared/src/protocol.ts`. Removed 17 test cases from `shared/src/test/protocol.test.ts` that tested these deprecated functions. All remaining tests pass (22 in shared, 140 total). These functions were replaced by internal methods (`checkCommandComplete()`, `checkInquireComplete()`) during Phase 4's EventEmitter refactor.
 
 ### Phase 9: Compile & Test
 **Files:** Root directory
 
-- [ ] Run `npm run compile` — all packages must compile without error
-- [ ] Run `npm test` — all existing tests must pass
-- [ ] Verify no regressions in agent-proxy or extension behavior
+- [x] Run `npm run compile` — all packages must compile without error
+- [x] Run `npm test` — all existing tests must pass (140 passing: 22 shared, 9 agent-proxy, 109 request-proxy)
+- [x] Verify no regressions in agent-proxy or extension behavior
 
 ## Success Criteria
 
@@ -458,8 +460,8 @@ Then in the state handlers:
 - [x] Buffering logic is explicit (not implicit)
 - [x] INQUIRE detection is clear and testable
 - [x] Client data protocol violations properly rejected (whitelist pattern)
-- [ ] No calls to removed shared helpers remain in request-proxy (Phase 8)
-- [x] All tests pass; no regressions (59/59 passing)
+- [x] No calls to removed shared helpers remain in request-proxy (Phase 8)
+- [x] All tests pass; no regressions (140/140 passing)
 - [x] Mermaid diagram matches implementation
 
 ## Notes

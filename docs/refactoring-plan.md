@@ -3,7 +3,9 @@
 **Status**: ✅ COMPLETE (Phases 1-7 complete, Phases 8-9 deferred)  
 **Started**: 2026-02-07  
 **Completion Date**: 2026-02-09  
-**Last Updated**: 2026-02-09
+**Last Updated**: 2026-02-15
+
+**NOTE**: This document describes the initial shared utilities refactor. Subsequently, `extractNextCommand()` and `determineNextState()` were removed during the EventEmitter state machine refactor (2026-02-12 through 2026-02-15). These functions were replaced with internal methods in request-proxy (`checkCommandComplete()`, `checkInquireComplete()`). See [request-state-machine-refactor.md](./request-state-machine-refactor.md) for details.
 
 ## Overview
 
