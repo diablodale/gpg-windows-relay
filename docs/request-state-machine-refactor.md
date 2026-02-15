@@ -468,6 +468,7 @@ Then in the state handlers:
 
 - **Event flow is deterministic** per the state diagram; socket callbacks emit events and handlers follow defined transitions. No async/sync debate—the state paths are fixed.
 - **Handlers emit events** as defined in the plan; example: `handleBufferingCommand` accumulates data and emits `COMMAND_COMPLETE` when newline is detected, or stays in state on partial data.
+- **Promise ↔ EventEmitter bridge**: `startRequestProxy()` returns a Promise (for awaitable startup), but internally uses EventEmitter (`ClientSessionManager extends EventEmitter`) for state machine. This pattern allows external callers to await operations while the state machine processes events asynchronously. Same pattern used in agent-proxy where VS Code commands return Promises that are resolved/rejected by event handlers.
 - **Timeouts in request-proxy** are limited to `gpgconf` calls (socket path resolution). Agent-proxy handles its own response timeouts internally via `waitForResponse()` and emits `AGENT_TIMEOUT` to the dispatcher.
 - **Full session cleanup** in `CLOSING` state must release all resources tied to the client session:
   - Remove socket and all event listeners
