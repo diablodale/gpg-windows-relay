@@ -543,7 +543,230 @@ socket.once('close', (hadError) => { /* routing logic */ });
 - All 36 baseline tests pass
 
 **Deliverable:** ✅ EventEmitter architecture in place, old code paths still work
-**Status:** Complete - Infrastructure ready for Phase 4 handler implementation
+**Status:** Complete - Infrastructure ready for Phase 3.1 type system alignment
+
+---
+
+### Phase 3.1: Type System Alignment (agent-proxy ↔ request-proxy)
+**Files:** 
+- `agent-proxy/src/services/agentProxy.ts` (remove StateHandler dead code)
+- `request-proxy/src/services/requestProxy.ts` (remove dead code + strengthen typing)
+
+**Objective:** Align type system approaches between agent-proxy and request-proxy for consistency, type safety, and future shared code extraction. Remove all dead code from both extensions.
+
+#### Current State Analysis
+
+**Type System Comparison:**
+
+| Aspect | agent-proxy (Phase 3) | request-proxy (completed) | Status |
+|--------|----------------------|---------------------------|--------|
+| SessionState | String literal union | String literal union | ✅ Consistent |
+| StateEvent | String literal union | **Discriminated union (UNUSED)** | ❌ Dead code in request-proxy |
+| StateHandler | **Type defined (UNUSED)** | **Type defined (UNUSED)** | ❌ Dead code in BOTH |
+| Event Payloads | Separate `EventPayloads` interface | **Embedded (UNUSED)** | ❌ Dead code in request-proxy |
+| Event Emission | `emit('EVENT_NAME', payload)` | `emit('EVENT_NAME', payload)` | ✅ Consistent (EventEmitter pattern) |
+| Event Handlers | `handler(payload)` | `handler(payload)` | ✅ Consistent (EventEmitter pattern) |
+| Transition Table | Strong: `StateTransitionTable` mapped type | Weak: `Record<SessionState, Record<string, SessionState>>` | ❌ Inconsistent |
+
+**Root Cause:**
+- request-proxy has **unused discriminated union type** that was never actually implemented
+- **Both extensions have unused `StateHandler` type** that cannot be enforced by vanilla EventEmitter
+- Both extensions actually use **EventEmitter's string-based pattern** (correct for EventEmitter)
+- agent-proxy has **stronger transition table typing** that request-proxy needs
+
+**Critical Discoveries:**
+
+1. **request-proxy's `StateEvent` discriminated union is dead code**. The actual implementation uses EventEmitter's native pattern:
+```typescript
+// Type says this (BUT IT'S NEVER USED):
+type StateEvent = { type: 'WRITE_OK' } | ...
+
+// Code actually does this (EventEmitter standard pattern):
+this.emit('WRITE_OK');                    // ✅ String event name
+this.on('WRITE_OK', handler);              // ✅ String event name
+private handleWriteOk(): void { }          // ✅ No event object parameter
+```
+
+2. **Both extensions have unused `StateHandler` type**. Vanilla EventEmitter cannot enforce typed handlers:
+```typescript
+// Both extensions define this (BUT IT'S NEVER USED):
+type StateHandler = (config, session, event) => Promise<SessionState>;
+
+// EventEmitter signature doesn't support it:
+.on(event: string, listener: (...args: any[]) => void)  // ❌ No type safety
+
+// Handlers are just methods (no StateHandler type applied):
+private handleWriteOk(): void { }        // ✅ Plain method
+private async handleError(error: string): Promise<void> { }  // ✅ Plain method
+```
+
+**Why StateHandler Cannot Work:**
+- EventEmitter's `.on()` accepts `(...args: any[]) => void` - no way to enforce typed handlers
+- Would need `typed-emitter` package or similar for handler type safety
+- Current `StateHandler` type exists but is never referenced or enforced
+- Should be removed as dead code from both extensions
+
+#### Recommended Unified Type System
+
+**Keep EventEmitter String-Based Pattern (Current in Both Extensions):**
+
+```typescript
+// 1. SessionState - string literal union (already consistent) ✅
+export type SessionState = 'DISCONNECTED' | 'READY' | /* ... */;
+
+// 2. StateEvent - string literal union (matches EventEmitter design)
+export type StateEvent =
+    | 'CLIENT_CONNECT_REQUESTED'
+    | 'CLIENT_COMMAND_RECEIVED'
+    | 'AGENT_SOCKET_CONNECTED'
+    | 'AGENT_WRITE_OK'
+    | 'AGENT_GREETING_RECEIVED'
+    | 'AGENT_DATA_CHUNK'
+    | 'AGENT_RESPONSE_COMPLETE'
+    | 'ERROR_OCCURRED'
+    | 'CLEANUP_REQUESTED'
+    | 'CLEANUP_COMPLETE'
+    | 'CLEANUP_ERROR';
+
+// 3. Event payloads - separate interface (type-safe, keeps payloads documented)
+export interface EventPayloads {
+    CLIENT_CONNECT_REQUESTED: { port: number; nonce: Buffer };
+    CLIENT_COMMAND_RECEIVED: { commandBlock: string };
+    AGENT_SOCKET_CONNECTED: undefined;
+    AGENT_WRITE_OK: undefined;
+    AGENT_GREETING_RECEIVED: { greeting: string };
+    AGENT_DATA_CHUNK: { chunk: string };
+    AGENT_RESPONSE_COMPLETE: { response: string };
+    ERROR_OCCURRED: { error: Error; message?: string };
+    CLEANUP_REQUESTED: { hadError: boolean };
+    CLEANUP_COMPLETE: undefined;
+    CLEANUP_ERROR: { error: Error };
+}
+
+// 4. Transition table - strongly typed
+type StateTransitionTable = {
+    [K in SessionState]: {
+        [E in StateEvent]?: SessionState;  // Event name is string
+    };
+};
+
+const STATE_TRANSITIONS: StateTransitionTable = {
+    DISCONNECTED: {
+        CLIENT_CONNECT_REQUESTED: 'CONNECTING_TO_AGENT'
+    },
+    // ... rest unchanged
+};
+
+// 5. Event emission - EventEmitter native pattern
+session.emit('AGENT_WRITE_OK');                                    // No payload
+session.emit('AGENT_GREETING_RECEIVED', { greeting: 'OK' });      // With payload
+session.on('AGENT_WRITE_OK', () => { });                           // Handler
+session.on('AGENT_GREETING_RECEIVED', (payload) => { });          // Handler with payload
+```
+
+**Why This Is Correct:**
+1. **Matches EventEmitter design** - `.emit(eventName, ...args)` uses strings, not objects
+2. **Type safety maintained** - `EventPayloads` interface documents expected payload types
+3. **Strong transition table** - Compile-time validation of state transitions
+4. **No runtime changes** - Both extensions already work this way
+5. **Simpler** - No need to wrap every event in `{ type: '...' }` object
+
+#### Migration Path
+
+**Phase 3.1a: Request-Proxy Cleanup (remove dead code)**
+- Remove unused discriminated union `StateEvent` type
+- Remove unused `StateHandler` type
+- Replace StateEvent with string literal union (matches actual usage)
+- Add `EventPayloads` interface (like agent-proxy)
+- Add strong `StateTransitionTable` mapped type (like agent-proxy)
+- Update transition table type annotation
+- **Result:** Types match implementation, dead code removed, stronger typing
+
+**Phase 3.1b: Agent-Proxy Cleanup (remove dead code)**
+- Remove unused `StateHandler` type
+- Verify rest of pattern is correct (it is)
+- **Result:** Dead code removed, clean reference implementation
+
+**Future (Phase 9 - Shared Code Extraction):**
+- Extract common types to `@gpg-relay/shared/stateMachine.ts`:
+  - Generic `SessionState` builder
+  - Generic `StateEvent` string literal pattern
+  - Generic `EventPayloads<Events>` interface pattern
+  - Generic `StateTransitionTable<States, Events>` mapped type
+
+#### Implementation Tasks
+
+**Phase 3.1a: Request-Proxy Type System Cleanup**
+
+- [ ] Remove unused discriminated union `StateEvent` type
+  - [ ] Delete entire discriminated union definition (lines ~50-67)
+  - [ ] Replace with string literal union matching actual event names
+- [ ] Remove unused `StateHandler` type
+  - [ ] Delete StateHandler type definition (line 67)
+  - [ ] EventEmitter pattern doesn't support typed handlers
+  - [ ] Vanilla EventEmitter `.on()` accepts `(...args: any[]) => void`
+  - [ ] Handlers are just methods, no formal signature enforcement
+- [ ] Add `EventPayloads` interface
+  - [ ] Create interface mapping event names to payload types
+  - [ ] Include all 14 events from request-proxy
+  - [ ] Use `undefined` for events with no payload
+- [ ] Add `StateTransitionTable` mapped type
+  ```typescript
+  type StateTransitionTable = {
+      [K in SessionState]: {
+          [E in StateEvent]?: SessionState;
+      };
+  };
+  ```
+- [ ] Update `transitionTable` type annotation
+  - [ ] Change from `Record<SessionState, Record<string, SessionState>>`
+  - [ ] To `const transitionTable: StateTransitionTable = { ... }`
+- [ ] Verify compilation
+  - [ ] Run `npm run compile` in request-proxy
+  - [ ] Fix any type errors (should be minimal - types now match reality)
+- [ ] Run request-proxy tests
+  - [ ] All tests must pass (no runtime changes, only type cleanup)
+- [ ] Update comments
+  - [ ] Document StateEvent as string literal union
+  - [ ] Document EventPayloads interface purpose
+
+**Phase 3.1b: Agent-Proxy Type System Cleanup**
+
+- [ ] Remove unused `StateHandler` type
+  - [ ] Delete StateHandler type definition (lines 122-126 in agentProxy.ts)
+  - [ ] EventEmitter pattern doesn't support typed handlers
+  - [ ] Type exists but is never referenced or enforced
+  - [ ] Dead code cleanup for consistency with request-proxy
+- [ ] Verify agent-proxy type definitions (should be correct after StateHandler removal)
+  - [ ] Confirm `StateEvent` is string literal union ✅
+  - [ ] Confirm `EventPayloads` interface exists ✅
+  - [ ] Confirm `StateTransitionTable` mapped type exists ✅
+  - [ ] Confirm event emission uses strings ✅
+- [ ] Verify compilation
+  - [ ] Run `npm run compile` in agent-proxy
+  - [ ] Should succeed (StateHandler was never used)
+- [ ] Run agent-proxy tests
+  - [ ] All tests must pass (no runtime changes, only type cleanup)
+- [ ] Document agent-proxy as reference implementation
+  - [ ] Pattern is correct for EventEmitter
+  - [ ] request-proxy now matches this pattern (after 3.1a)
+
+**Documentation Updates**
+
+- [ ] Update AGENTS.md architecture section
+  - [ ] Document EventEmitter string-based event pattern
+  - [ ] Explain why discriminated unions don't work with EventEmitter
+  - [ ] Explain why StateHandler types cannot be enforced by vanilla EventEmitter
+  - [ ] Document EventPayloads interface pattern (for documentation only)
+  - [ ] Document StateTransitionTable pattern
+  - [ ] Note: typed-emitter package would be needed for real handler type safety
+- [ ] Update this refactoring plan
+  - [ ] Mark Phase 3.1a complete when request-proxy cleaned up
+  - [ ] Mark Phase 3.1b complete when agent-proxy cleaned up
+  - [ ] Add notes about EventEmitter design patterns and limitations
+
+**Deliverable:** ✅ Both extensions use consistent EventEmitter-compatible types, all dead code removed
+**Target:** Type system alignment complete, ready for Phase 4
 
 ---
 
