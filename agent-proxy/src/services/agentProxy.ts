@@ -180,11 +180,84 @@ export class AgentSessionManager extends EventEmitter {
 
     /**
      * Register handlers for all 11 events
+     * Phase 3: Register event listeners (Phase 4 will implement full logic)
      */
     private registerEventHandlers(): void {
-        // TODO: Register handlers in Phase 4
-        // this.on('CLIENT_CONNECT_REQUESTED', (payload) => this.handleEvent('CLIENT_CONNECT_REQUESTED', payload));
-        // ... etc for all 11 events
+        // Client events
+        this.on('CLIENT_CONNECT_REQUESTED', (payload) => this.handleClientConnectRequested(payload));
+        this.on('CLIENT_COMMAND_RECEIVED', (payload) => this.handleClientCommandReceived(payload));
+
+        // Agent events
+        this.on('AGENT_SOCKET_CONNECTED', () => this.handleAgentSocketConnected());
+        this.on('AGENT_WRITE_OK', (payload) => this.handleAgentWriteOk(payload));
+        this.on('AGENT_GREETING_RECEIVED', (payload) => this.handleAgentGreetingReceived(payload));
+        this.on('AGENT_DATA_CHUNK', (payload) => this.handleAgentDataChunk(payload));
+        this.on('AGENT_RESPONSE_COMPLETE', (payload) => this.handleAgentResponseComplete(payload));
+
+        // Error and cleanup events
+        this.on('ERROR_OCCURRED', (payload) => this.handleErrorOccurred(payload));
+        this.on('CLEANUP_REQUESTED', (payload) => this.handleCleanupRequested(payload));
+        this.on('CLEANUP_COMPLETE', () => this.handleCleanupComplete());
+        this.on('CLEANUP_ERROR', (payload) => this.handleCleanupError(payload));
+    }
+
+    // ========================================================================
+    // Event Handler Stubs (Phase 3: structure only, Phase 4: full logic)
+    // ========================================================================
+
+    private handleClientConnectRequested(_payload: unknown): void {
+        log(this.config, `[${this.sessionId}] Event: CLIENT_CONNECT_REQUESTED (stub)`);
+        // Phase 4: Implement connection logic
+    }
+
+    private handleClientCommandReceived(_payload: unknown): void {
+        log(this.config, `[${this.sessionId}] Event: CLIENT_COMMAND_RECEIVED (stub)`);
+        // Phase 4: Implement command sending logic
+    }
+
+    private handleAgentSocketConnected(): void {
+        log(this.config, `[${this.sessionId}] Event: AGENT_SOCKET_CONNECTED (stub)`);
+        // Phase 4: Implement socket connected logic
+    }
+
+    private handleAgentWriteOk(_payload: unknown): void {
+        log(this.config, `[${this.sessionId}] Event: AGENT_WRITE_OK (stub)`);
+        // Phase 4: Implement write completion logic
+    }
+
+    private handleAgentGreetingReceived(_payload: unknown): void {
+        log(this.config, `[${this.sessionId}] Event: AGENT_GREETING_RECEIVED (stub)`);
+        // Phase 4: Implement greeting handling logic
+    }
+
+    private handleAgentDataChunk(_payload: unknown): void {
+        log(this.config, `[${this.sessionId}] Event: AGENT_DATA_CHUNK (stub)`);
+        // Phase 4: Implement data accumulation logic
+    }
+
+    private handleAgentResponseComplete(_payload: unknown): void {
+        log(this.config, `[${this.sessionId}] Event: AGENT_RESPONSE_COMPLETE (stub)`);
+        // Phase 4: Implement response completion logic
+    }
+
+    private handleErrorOccurred(_payload: unknown): void {
+        log(this.config, `[${this.sessionId}] Event: ERROR_OCCURRED (stub)`);
+        // Phase 4: Implement error handling logic
+    }
+
+    private handleCleanupRequested(_payload: unknown): void {
+        log(this.config, `[${this.sessionId}] Event: CLEANUP_REQUESTED (stub)`);
+        // Phase 4: Implement cleanup logic
+    }
+
+    private handleCleanupComplete(): void {
+        log(this.config, `[${this.sessionId}] Event: CLEANUP_COMPLETE (stub)`);
+        // Phase 4: Implement cleanup completion logic
+    }
+
+    private handleCleanupError(_payload: unknown): void {
+        log(this.config, `[${this.sessionId}] Event: CLEANUP_ERROR (stub)`);
+        // Phase 4: Implement cleanup error handling logic
     }
 
     /**
@@ -200,7 +273,7 @@ export class AgentSessionManager extends EventEmitter {
     private setState(newState: SessionState, event: StateEvent): void {
         const oldState = this.state;
         this.state = newState;
-        log(this.config, `[${this.sessionId}] State transition: ${oldState} → ${newState} (event: ${event})`);
+        log(this.config, `[${this.sessionId}] ${oldState} → ${newState} (event: ${event})`);
     }
 
     /**

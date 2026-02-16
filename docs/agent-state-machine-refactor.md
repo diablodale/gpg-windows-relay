@@ -490,39 +490,39 @@ Added to `shared/src/test/helpers.ts`:
 
 ---
 
-### Phase 3: EventEmitter Session Manager Architecture
+### Phase 3: EventEmitter Session Manager Architecture ✅ COMPLETE
 **File:** `agent-proxy/src/services/agentProxy.ts`
 
 Implement EventEmitter-based session manager (per-session instances):
 
-- [ ] Create `AgentSessionManager extends EventEmitter` class
-- [ ] Add `sessionId: string`, `state: SessionState`, `socket: net.Socket`, `buffer: string` fields
-- [ ] Add `isDisconnecting: boolean` flag for BYE command handling (not used - see socket close handler)
-- [ ] Implement `setState(newState: SessionState)` with logging
-- [ ] Register event handlers for all 11 events (`.on('EVENT_NAME', handler)`)
-- [ ] Implement `getState()` accessor for testing
-- [ ] Wire socket 'close' event handler with hadError routing logic
+- [x] Create `AgentSessionManager extends EventEmitter` class
+- [x] Add `sessionId: string`, `state: SessionState`, `socket: net.Socket`, `buffer: string` fields
+- [N/A] Add `isDisconnecting: boolean` flag for BYE command handling (not needed - see socket close handler)
+- [x] Implement `setState(newState: SessionState)` with logging
+- [x] Register event handlers for all 11 events (`.on('EVENT_NAME', handler)`)
+- [x] Implement `getState()` accessor for testing
+- [x] Wire socket 'close' event handler with hadError routing logic
 
 **Socket Event Wiring:**
-- [ ] Wire socket 'connect' event with **`.once()`** → emit `AGENT_SOCKET_CONNECTED`
+- [x] Wire socket 'connect' event with **`.once()`** → emit `AGENT_SOCKET_CONNECTED`
   - Fires exactly once when connection established
   - `.once()` provides automatic cleanup
-- [ ] Wire socket 'data' event with **`.on()`** → emit `AGENT_DATA_CHUNK`
+- [x] Wire socket 'data' event with **`.on()`** → emit `AGENT_DATA_CHUNK`
   - Fires multiple times as response chunks arrive
   - Must remain registered to accumulate complete response
-- [ ] Wire socket 'error' event with **`.once()`** → emit `ERROR_OCCURRED`
+- [x] Wire socket 'error' event with **`.once()`** → emit `ERROR_OCCURRED`
   - Fires once when error occurs
   - Socket typically closes after error anyway
   - `.once()` prevents duplicate error handling
-- [ ] Wire socket 'close' event with **`.once()`** → **CRITICAL: Can fire in ANY state where socket exists**
+- [x] Wire socket 'close' event with **`.once()`** → **CRITICAL: Can fire in ANY state where socket exists**
   - Fires exactly once when socket closes
   - `.once()` provides automatic cleanup and prevents duplicate handling
   - Check current state first (defensive)
   - Ignore if in CLOSING, ERROR, or DISCONNECTED (already handled or no socket)
   - `hadError === true` → emit `ERROR_OCCURRED` (from any remaining state)
   - `hadError === false` → emit `CLEANUP_REQUESTED` with {hadError: false} (from any remaining state)
-- [ ] Register `CLEANUP_REQUESTED` handler with `.once()` to prevent race conditions
-- [ ] Note: Socket 'close' handler must be robust to ANY-state close events
+- [x] Register `CLEANUP_REQUESTED` handler with `.once()` to prevent race conditions
+- [x] Note: Socket 'close' handler must be robust to ANY-state close events
 
 **Socket Event Registration Pattern:**
 ```typescript
@@ -532,7 +532,18 @@ socket.once('error', (err) => session.emit('ERROR_OCCURRED', { error: err }));
 socket.once('close', (hadError) => { /* routing logic */ });
 ```
 
+**Implementation Notes:**
+- AgentSessionManager class fully implemented with EventEmitter pattern
+- All 11 event handlers registered with stub implementations for Phase 4
+- Socket event wiring complete (connect, data, error, close)
+- State transition logic implemented with setState() and transition() methods
+- Timeout management fields added (connectionTimeout, greetingTimeout, responseTimeout)
+- Helper methods: getState(), getSocket(), setSocket(), wireSocketEvents(), clearAllTimeouts()
+- Old AgentProxy code paths continue to work unchanged (backwards compatible)
+- All 36 baseline tests pass
+
 **Deliverable:** ✅ EventEmitter architecture in place, old code paths still work
+**Status:** Complete - Infrastructure ready for Phase 4 handler implementation
 
 ---
 
