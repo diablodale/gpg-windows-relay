@@ -88,7 +88,7 @@ stateDiagram-v2
 ### Phase 1: Type Definitions & Infrastructure ✅ COMPLETE
 **File:** `request-proxy/src/services/requestProxy.ts`
 
-- [x] Define `ClientState` type with all 12 states
+- [x] Define `SessionState` type with all 12 states
 - [x] Define `StateEvent` union with all 14 events (consolidated from 23 during Phase 5)
 - [x] Define `StateHandler` function signature
 - [x] Create transition table (lookup: `(state, event) → nextState`)

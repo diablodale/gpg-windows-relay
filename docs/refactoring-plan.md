@@ -60,9 +60,9 @@ Extract ~200 lines of duplicate code into shared utilities and enable 80-90% uni
 - [x] Implement `extractErrorMessage(error: unknown, fallback?: string): string`
 - [x] Extract & implement `parseSocketFile(data: Buffer): { port: number; nonce: Buffer }`
   - From agent-proxy/src/services/agentProxy.ts lines 79-102
-- [x] Extract & implement `extractNextCommand(buffer: string, state: ClientState): { command: string | null; remaining: string }`
+- [x] Extract & implement `extractNextCommand(buffer: string, state: SessionState): { command: string | null; remaining: string }`
   - From request-proxy/src/services/requestProxy.ts lines 219-239
-- [x] Extract & implement `determineNextState(response: string, currentState: string): ClientState`
+- [x] Extract & implement `determineNextState(response: string, currentState: string): SessionState`
   - From request-proxy/src/services/requestProxy.ts lines 271-277
 - [x] Add JSDoc comments for all exported functions
 - [x] Add input validation and error handling

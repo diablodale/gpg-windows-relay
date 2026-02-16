@@ -50,11 +50,11 @@ describe('RequestProxy', () => {
             await instance.stop();
         });
 
-        it('should validate all transitions are valid ClientState types', async () => {
+        it('should validate all transitions are valid SessionState types', async () => {
             // This test validates state transitions via type checking at compile-time:
-            // - transitionTable: Record<ClientState, Record<string, ClientState>>
-            // - All keys must be valid ClientState strings
-            // - All values must be valid ClientState strings
+            // - transitionTable: Record<SessionState, Record<string, SessionState>>
+            // - All keys must be valid SessionState strings
+            // - All values must be valid SessionState strings
             // - TypeScript enforces this, so if code compiles, validation passes
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
@@ -403,7 +403,7 @@ describe('RequestProxy', () => {
     describe('Phase 7a: State Machine Fundamentals', () => {
         it('should have handlers for all 12 states (compile-time validation)', async () => {
             // This test validates that all states have handlers via TypeScript compile-time checking
-            // The stateHandlers map in requestProxy.ts must have entries for all ClientState values
+            // The stateHandlers map in requestProxy.ts must have entries for all SessionState values
             // If code compiles, this validation passes
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
@@ -415,7 +415,7 @@ describe('RequestProxy', () => {
 
         it('should validate transition table covers valid state/event pairs', async () => {
             // Transition table validation happens at compile-time via TypeScript types
-            // transitionTable: Record<ClientState, Record<string, ClientState>>
+            // transitionTable: Record<SessionState, Record<string, SessionState>>
             // This ensures all transitions are to valid states
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },

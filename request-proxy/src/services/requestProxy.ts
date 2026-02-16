@@ -28,7 +28,7 @@ import { VSCodeCommandExecutor } from './commandExecutor';
 /**
  * Client session states (12 total)
  */
-type ClientState =
+type SessionState =
   | 'DISCONNECTED'
   | 'CLIENT_CONNECTED'
   | 'AGENT_CONNECTING'
@@ -64,13 +64,13 @@ type StateEvent =
 /**
  * State handler function type
  */
-type StateHandler = (config: RequestProxyConfigWithExecutor, session: ClientSession, event: StateEvent) => Promise<ClientState>;
+type StateHandler = (config: RequestProxyConfigWithExecutor, session: ClientSession, event: StateEvent) => Promise<SessionState>;
 
 /**
  * Transition table: (state, event type) → next state
  * Used for validation and routing
  */
-const transitionTable: Record<ClientState, Record<string, ClientState>> = {
+const transitionTable: Record<SessionState, Record<string, SessionState>> = {
   DISCONNECTED: {
     'CLIENT_SOCKET_CONNECTED': 'CLIENT_CONNECTED',
   },
@@ -143,7 +143,7 @@ export interface RequestProxyInstance {
 interface ClientSession {
     socket: net.Socket;
     sessionId: string | null;
-    state: ClientState;
+    state: SessionState;
     buffer: string;
 }
 
@@ -158,7 +158,7 @@ class ClientSessionManager extends EventEmitter {
     public readonly config: RequestProxyConfigWithExecutor;
     public socket: net.Socket;
     public sessionId: string | null = null;
-    private state: ClientState = 'DISCONNECTED';
+    private state: SessionState = 'DISCONNECTED';
     private buffer: string = '';
 
     constructor(config: RequestProxyConfigWithExecutor, socket: net.Socket) {
@@ -194,7 +194,7 @@ class ClientSessionManager extends EventEmitter {
      */
     public handleIncomingData(chunk: Buffer): void {
         // Whitelist of states that can accept client data
-        const validStates: ClientState[] = ['READY', 'BUFFERING_COMMAND', 'BUFFERING_INQUIRE'];
+        const validStates: SessionState[] = ['READY', 'BUFFERING_COMMAND', 'BUFFERING_INQUIRE'];
 
         // Check for protocol violation - client sending data in invalid state
         if (!validStates.includes(this.state)) {
@@ -203,7 +203,7 @@ class ClientSessionManager extends EventEmitter {
         }
 
         // Determine event type based on current state
-        if (this.state === 'READY') {
+        if (this.getState() === 'READY') {
             // First data in READY state -> transition to BUFFERING_COMMAND
             this.emit('CLIENT_DATA_START', chunk);
         } else {
@@ -274,9 +274,9 @@ class ClientSessionManager extends EventEmitter {
             log(this.config, `[${this.sessionId}] Buffering, received ${data.length} bytes, total: ${this.buffer.length}`);
 
             // Check for completion based on current state
-            if (this.state === 'BUFFERING_COMMAND') {
+            if (this.getState() === 'BUFFERING_COMMAND') {
                 this.checkCommandComplete();
-            } else if (this.state === 'BUFFERING_INQUIRE') {
+            } else if (this.getState() === 'BUFFERING_INQUIRE') {
                 this.checkInquireComplete();
             }
         } catch (err) {
@@ -294,10 +294,10 @@ class ClientSessionManager extends EventEmitter {
     }
 
     private handleWriteOk(): void {
-        if (this.state === 'SENDING_TO_AGENT') {
+        if (this.getState() === 'SENDING_TO_AGENT') {
             this.setState('WAITING_FOR_AGENT');
             log(this.config, `[${this.sessionId}] Write to agent OK, waiting for response`);
-        } else if (this.state === 'SENDING_TO_CLIENT') {
+        } else if (this.getState() === 'SENDING_TO_CLIENT') {
             // Response written to client, return to READY
             this.setState('READY');
             log(this.config, `[${this.sessionId}] Write to client OK, ready for next command`);
@@ -397,12 +397,21 @@ class ClientSessionManager extends EventEmitter {
     // Helper Methods
     // ========================================================================
 
-    private setState(newState: ClientState): void {
+    /**
+     * Get current state (for testing and debugging)
+     */
+    public getState(): SessionState {
+        return this.state;
+    }
+
+    /**
+     * Set state with logging
+     */
+    private setState(newState: SessionState): void {
         const oldState = this.state;
         this.state = newState;
-        if (oldState !== newState) {
-            log(this.config, `[${this.sessionId ?? 'pending'}] ${oldState} --> ${newState}`);
-        }
+        // TODO add event which caused transition
+        log(this.config, `[${this.sessionId ?? 'pending'}] ${oldState} → ${newState}`);
     }
 
     /**
