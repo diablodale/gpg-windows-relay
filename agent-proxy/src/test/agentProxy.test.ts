@@ -226,9 +226,11 @@ describe('AgentProxy', () => {
             // Disconnect
             const disconnectPromise = agentProxy.disconnectAgent(sessionId);
 
-            // Simulate BYE response
+            // Simulate BYE response and socket close (agent closes socket after BYE)
             await new Promise((resolve) => setTimeout(resolve, 10));
             socket!.emit('data', Buffer.from('OK\n'));
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            socket!.emit('close', false); // hadError=false for graceful close
 
             await disconnectPromise;
 
@@ -288,6 +290,8 @@ describe('AgentProxy', () => {
             const disconnectPromise = agentProxy.disconnectAgent(session1.sessionId);
             await new Promise((resolve) => setTimeout(resolve, 10));
             socket!.emit('data', Buffer.from('OK\n'));
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            socket!.emit('close', false); // hadError=false for graceful close
             await disconnectPromise;
 
             expect(agentProxy.isRunning()).to.equal(false);
@@ -1304,12 +1308,16 @@ describe('AgentProxy', () => {
             expect(agentProxy.isRunning()).to.equal(false);
 
             // Manually emit close again - should not cause errors or duplicate cleanup
+            // Note: .once() handler already removed, so this should be ignored
             socket!.emit('close', false);
             await new Promise((resolve) => setTimeout(resolve, 30));
 
-            // Verify no errors occurred (no additional state transitions logged)
-            const errorLogs = logs.filter(log => log.includes('ERROR') || log.includes('FATAL'));
-            expect(errorLogs.length).to.equal(0);
+            // Verify .once() prevented duplicate handling by checking session is still disconnected
+            expect(agentProxy.isRunning()).to.equal(false);
+
+            // Verify cleanup didn't run twice (would log errors if it did)
+            const cleanupCount = logs.filter(log => log.includes('Cleanup requested')).length;
+            expect(cleanupCount).to.equal(1);
         });
 
         it('should use .once() for socket error - no duplicate ERROR_OCCURRED', async () => {
@@ -1344,14 +1352,24 @@ describe('AgentProxy', () => {
             expect(errorLogCount).to.be.greaterThan(0);
 
             // Try to emit error again (should be ignored by .once())
-            socket!.emit('error', new Error('Second error'));
+            // Wrap in try-catch because EventEmitter throws unhandled 'error' events
+            try {
+                socket!.emit('error', new Error('Second error'));
+            } catch (e) {
+                // Expected: no handler registered (removed by .once()), so EventEmitter throws
+                // This is correct behavior - the .once() handler only fired for the first error
+            }
             await new Promise((resolve) => setTimeout(resolve, 30));
 
-            // Should still only log first error
+            // Should still only log first error (second error didn't reach handler)
             const finalErrorLogCount = logs.filter(log => log.includes('Agent socket error')).length;
             expect(finalErrorLogCount).to.equal(errorLogCount);
 
-            // Close to cleanup
+            // Verify second error never reached logs (was thrown by EventEmitter, not processed)
+            const secondErrorCount = logs.filter(log => log.includes('Second error')).length;
+            expect(secondErrorCount).to.equal(0);
+
+            // Close cleans up
             socket!.end();
             await new Promise((resolve) => setTimeout(resolve, 30));
         });

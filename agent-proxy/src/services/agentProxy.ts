@@ -24,7 +24,8 @@ import type { LogConfig, IFileSystem, ISocketFactory } from '@gpg-relay/shared';
  */
 export type SessionState =
     | 'DISCONNECTED'           // No active connection, session can be created
-    | 'CONNECTING_TO_AGENT'    // TCP socket created, nonce authentication in progress
+    | 'CONNECTING_TO_AGENT'    // TCP socket connection in progress
+    | 'SOCKET_CONNECTED'       // Socket connected, ready to send nonce
     | 'READY'                  // Connected and authenticated, can accept commands
     | 'SENDING_TO_AGENT'       // Command write in progress to agent
     | 'WAITING_FOR_AGENT'      // Accumulating response chunks from agent
@@ -32,18 +33,17 @@ export type SessionState =
     | 'CLOSING';               // Cleanup in progress (socket teardown, session removal)
 
 /**
- * State machine events (11 total)
+ * State machine events (10 total)
  */
 export type StateEvent =
     // Client events (from request-proxy calling VS Code commands)
     | 'CLIENT_CONNECT_REQUESTED'
-    | 'CLIENT_COMMAND_RECEIVED'
+    | 'CLIENT_DATA_RECEIVED'
     // Agent events (from gpg-agent or socket operations)
     | 'AGENT_SOCKET_CONNECTED'
     | 'AGENT_WRITE_OK'
-    | 'AGENT_GREETING_RECEIVED'
     | 'AGENT_DATA_CHUNK'
-    | 'AGENT_RESPONSE_COMPLETE'
+    | 'AGENT_DATA_RECEIVED'
     // Error & cleanup events
     | 'ERROR_OCCURRED'
     | 'CLEANUP_REQUESTED'
@@ -68,14 +68,17 @@ const STATE_TRANSITIONS: StateTransitionTable = {
         CLIENT_CONNECT_REQUESTED: 'CONNECTING_TO_AGENT'
     },
     CONNECTING_TO_AGENT: {
-        AGENT_SOCKET_CONNECTED: 'CONNECTING_TO_AGENT',  // Stay in state, waiting for nonce write
-        AGENT_WRITE_OK: 'CONNECTING_TO_AGENT',          // Nonce sent, waiting for greeting
-        AGENT_GREETING_RECEIVED: 'READY',
+        AGENT_SOCKET_CONNECTED: 'SOCKET_CONNECTED',    // Socket connected
+        ERROR_OCCURRED: 'ERROR',
+        CLEANUP_REQUESTED: 'CLOSING'                    // Socket close hadError=false
+    },
+    SOCKET_CONNECTED: {
+        CLIENT_DATA_RECEIVED: 'SENDING_TO_AGENT',       // Nonce send begins
         ERROR_OCCURRED: 'ERROR',
         CLEANUP_REQUESTED: 'CLOSING'                    // Socket close hadError=false
     },
     READY: {
-        CLIENT_COMMAND_RECEIVED: 'SENDING_TO_AGENT',
+        CLIENT_DATA_RECEIVED: 'SENDING_TO_AGENT',
         ERROR_OCCURRED: 'ERROR',
         CLEANUP_REQUESTED: 'CLOSING'                    // Socket close hadError=false
     },
@@ -86,7 +89,7 @@ const STATE_TRANSITIONS: StateTransitionTable = {
     },
     WAITING_FOR_AGENT: {
         AGENT_DATA_CHUNK: 'WAITING_FOR_AGENT',         // Stay in state, accumulating
-        AGENT_RESPONSE_COMPLETE: 'READY',
+        AGENT_DATA_RECEIVED: 'READY',
         ERROR_OCCURRED: 'ERROR',
         CLEANUP_REQUESTED: 'CLOSING'                    // Socket close hadError=false (BYE race)
     },
@@ -104,12 +107,11 @@ const STATE_TRANSITIONS: StateTransitionTable = {
  */
 export interface EventPayloads {
     CLIENT_CONNECT_REQUESTED: { port: number; nonce: Buffer };
-    CLIENT_COMMAND_RECEIVED: { commandBlock: string };
+    CLIENT_DATA_RECEIVED: { commandBlock: string | Buffer };
     AGENT_SOCKET_CONNECTED: undefined;
     AGENT_WRITE_OK: undefined;
-    AGENT_GREETING_RECEIVED: { greeting: string };
     AGENT_DATA_CHUNK: { chunk: string };
-    AGENT_RESPONSE_COMPLETE: { response: string };
+    AGENT_DATA_RECEIVED: { response: string };
     ERROR_OCCURRED: { error: Error; message?: string };
     CLEANUP_REQUESTED: { hadError: boolean };
     CLEANUP_COMPLETE: undefined;
@@ -158,6 +160,7 @@ export class AgentSessionManager extends EventEmitter {
     private connectionTimeout: NodeJS.Timeout | null = null;
     private greetingTimeout: NodeJS.Timeout | null = null;
     private responseTimeout: NodeJS.Timeout | null = null;
+    private lastError: Error | null = null;  // Stores error for Promise bridges to retrieve
 
     constructor(
         sessionId: string,
@@ -167,21 +170,18 @@ export class AgentSessionManager extends EventEmitter {
         super();
         this.sessionId = sessionId;
 
-        // Register handlers for all 11 events
+        // Register handlers for all 10 events
         // Use .once() for single-fire events, .on() for events that can fire multiple times
 
         // Single-fire initialization events
         this.once('CLIENT_CONNECT_REQUESTED', (payload) => this.handleClientConnectRequested(payload));
         this.once('AGENT_SOCKET_CONNECTED', () => this.handleAgentSocketConnected());
-        this.once('AGENT_GREETING_RECEIVED', (payload) => this.handleAgentGreetingReceived(payload));
 
-        // Multi-fire command event (multiple commands per session)
-        this.on('CLIENT_COMMAND_RECEIVED', (payload) => this.handleClientCommandReceived(payload));
-
-        // Multi-fire agent I/O events (multiple writes and data chunks per session)
-        this.on('AGENT_WRITE_OK', (payload) => this.handleAgentWriteOk(payload));
+        // Multi-fire events (can occur multiple times per session)
+        this.on('CLIENT_DATA_RECEIVED', (payload) => this.handleClientDataReceived(payload));
+        this.on('AGENT_WRITE_OK', () => this.handleAgentWriteOk());
         this.on('AGENT_DATA_CHUNK', (payload) => this.handleAgentDataChunk(payload));
-        this.on('AGENT_RESPONSE_COMPLETE', (payload) => this.handleAgentResponseComplete(payload));
+        this.on('AGENT_DATA_RECEIVED', (payload) => this.handleAgentDataReceived(payload));
 
         // Single-fire terminal events
         this.once('ERROR_OCCURRED', (payload) => this.handleErrorOccurred(payload));
@@ -191,62 +191,314 @@ export class AgentSessionManager extends EventEmitter {
     }
 
     // ========================================================================
-    // Event Handler Stubs (Phase 3: structure only, Phase 4: full logic)
+    // Event Handlers (Phase 4: full implementation)
     // ========================================================================
 
-    private handleClientConnectRequested(_payload: unknown): void {
-        log(this.config, `[${this.sessionId}] Event: CLIENT_CONNECT_REQUESTED (stub)`);
-        // Phase 4: Implement connection logic
+    /**
+     * Handle CLIENT_CONNECT_REQUESTED: initiate connection to agent
+     * Transition: DISCONNECTED → CONNECTING_TO_AGENT
+     */
+    private handleClientConnectRequested(payload: EventPayloads['CLIENT_CONNECT_REQUESTED']): void {
+        this.transition('CLIENT_CONNECT_REQUESTED');
+
+        const { port, nonce } = payload;
+        log(this.config, `[${this.sessionId}] Connecting to localhost:${port}...`);
+
+        // Set connection timeout
+        this.connectionTimeout = setTimeout(() => {
+            log(this.config, `[${this.sessionId}] Connection timeout after ${this.config.connectionTimeoutMs}ms`);
+            this.emit('ERROR_OCCURRED', {
+                error: new Error(`Connection timeout after ${this.config.connectionTimeoutMs}ms`)
+            });
+        }, this.config.connectionTimeoutMs);
+
+        // Create socket connection
+        const socket = this.socketFactory.createConnection({
+            host: 'localhost',
+            port: port
+        });
+
+        this.setSocket(socket);
+
+        // Store nonce for sending after connection
+        (this as any).pendingNonce = nonce;
     }
 
-    private handleClientCommandReceived(_payload: unknown): void {
-        log(this.config, `[${this.sessionId}] Event: CLIENT_COMMAND_RECEIVED (stub)`);
-        // Phase 4: Implement command sending logic
-    }
-
+    /**
+     * Handle AGENT_SOCKET_CONNECTED: socket connection established
+     * Transition: CONNECTING_TO_AGENT → SOCKET_CONNECTED
+     * Clears connection timeout and emits CLIENT_DATA_RECEIVED with nonce
+     */
     private handleAgentSocketConnected(): void {
-        log(this.config, `[${this.sessionId}] Event: AGENT_SOCKET_CONNECTED (stub)`);
-        // Phase 4: Implement socket connected logic
+        this.transition('AGENT_SOCKET_CONNECTED');
+
+        // Clear connection timeout
+        if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+        }
+
+        const nonce = (this as any).pendingNonce as Buffer;
+        if (!nonce) {
+            this.emit('ERROR_OCCURRED', { error: new Error('Missing nonce after connection') });
+            return;
+        }
+
+        log(this.config, `[${this.sessionId}] Socket connected, ready to send nonce`);
+
+        // Clean up pending nonce
+        delete (this as any).pendingNonce;
+
+        // Send nonce as first data
+        this.emit('CLIENT_DATA_RECEIVED', { commandBlock: nonce });
     }
 
-    private handleAgentWriteOk(_payload: unknown): void {
-        log(this.config, `[${this.sessionId}] Event: AGENT_WRITE_OK (stub)`);
-        // Phase 4: Implement write completion logic
+    /**
+     * Handle AGENT_WRITE_OK: write completed successfully
+     * Transition: SENDING_TO_AGENT → WAITING_FOR_AGENT
+     * Sets response timeout (greeting or command response)
+     */
+    private handleAgentWriteOk(): void {
+        this.transition('AGENT_WRITE_OK');
+        log(this.config, `[${this.sessionId}] Write completed, waiting for response...`);
+
+        // Set response timeout (use greetingTimeout for first response, responseTimeout for subsequent)
+        const isFirstResponse = !this.greetingTimeout && !this.responseTimeout;
+        const timeoutMs = isFirstResponse ? this.config.greetingTimeoutMs : this.config.responseTimeoutMs;
+        const timeoutName = isFirstResponse ? 'Greeting' : 'Response';
+
+        const timeout = setTimeout(() => {
+            log(this.config, `[${this.sessionId}] ${timeoutName} timeout after ${timeoutMs}ms`);
+            this.emit('ERROR_OCCURRED', {
+                error: new Error(`${timeoutName} timeout after ${timeoutMs}ms`)
+            });
+        }, timeoutMs);
+
+        if (isFirstResponse) {
+            this.greetingTimeout = timeout;
+        } else {
+            this.responseTimeout = timeout;
+        }
     }
 
-    private handleAgentGreetingReceived(_payload: unknown): void {
-        log(this.config, `[${this.sessionId}] Event: AGENT_GREETING_RECEIVED (stub)`);
-        // Phase 4: Implement greeting handling logic
+    /**
+     * Handle CLIENT_DATA_RECEIVED: data received from client (nonce or command)
+     * Transition: SOCKET_CONNECTED → SENDING_TO_AGENT or READY → SENDING_TO_AGENT
+     */
+    private handleClientDataReceived(payload: EventPayloads['CLIENT_DATA_RECEIVED']): void {
+        this.transition('CLIENT_DATA_RECEIVED');
+
+        const { commandBlock } = payload;
+        const isNonce = Buffer.isBuffer(commandBlock);
+        const logMsg = isNonce
+            ? `${commandBlock.length}-byte nonce`
+            : sanitizeForLog(commandBlock);
+        log(this.config, `[${this.sessionId}] Sending ${isNonce ? 'nonce' : 'command'}: ${logMsg}`);
+
+        // Reset buffer for new response
+        this.buffer = '';
+
+        // Write data to socket
+        if (!this.socket) {
+            this.emit('ERROR_OCCURRED', { error: new Error('No socket available for data') });
+            return;
+        }
+
+        this.socket.write(commandBlock, (error) => {
+            if (error) {
+                log(this.config, `[${this.sessionId}] Write failed: ${error.message}`);
+                this.emit('ERROR_OCCURRED', { error });
+            } else {
+                this.emit('AGENT_WRITE_OK');
+            }
+        });
     }
 
-    private handleAgentDataChunk(_payload: unknown): void {
-        log(this.config, `[${this.sessionId}] Event: AGENT_DATA_CHUNK (stub)`);
-        // Phase 4: Implement data accumulation logic
+    /**
+     * Handle AGENT_DATA_CHUNK: data received from agent
+     * Accumulates data and checks for response completion
+     * Emits AGENT_DATA_RECEIVED when complete response detected (greeting or command response)
+     */
+    private handleAgentDataChunk(payload: EventPayloads['AGENT_DATA_CHUNK']): void {
+        const { chunk } = payload;
+        this.buffer += chunk;
+
+        log(this.config, `[${this.sessionId}] Accumulated ${this.buffer.length} bytes`);
+
+        // Check if response is complete
+        if (this.isCompleteResponse(this.buffer)) {
+            log(this.config, `[${this.sessionId}] Complete response: ${sanitizeForLog(this.buffer)}`);
+
+            // Clear appropriate timeout
+            if (this.greetingTimeout) {
+                clearTimeout(this.greetingTimeout);
+                this.greetingTimeout = null;
+            }
+            if (this.responseTimeout) {
+                clearTimeout(this.responseTimeout);
+                this.responseTimeout = null;
+            }
+
+            // Emit AGENT_DATA_RECEIVED (unified event for greeting and command responses)
+            this.emit('AGENT_DATA_RECEIVED', { response: this.buffer });
+        }
     }
 
-    private handleAgentResponseComplete(_payload: unknown): void {
-        log(this.config, `[${this.sessionId}] Event: AGENT_RESPONSE_COMPLETE (stub)`);
-        // Phase 4: Implement response completion logic
+    /**
+     * Handle AGENT_DATA_RECEIVED: complete response received (greeting or command response)
+     * Transition: WAITING_FOR_AGENT → READY
+     * Validates greeting on first response only
+     */
+    private handleAgentDataReceived(payload: EventPayloads['AGENT_DATA_RECEIVED']): void {
+        const { response } = payload;
+        const isGreeting = this.greetingTimeout !== null;
+
+        // Validate greeting (first response only)
+        if (isGreeting) {
+            const greetingLine = response.trim();
+            if (!greetingLine.startsWith('OK')) {
+                log(this.config, `[${this.sessionId}] Invalid greeting: ${greetingLine}`);
+                this.emit('ERROR_OCCURRED', {
+                    error: new Error(`Invalid greeting from agent: ${greetingLine}`)
+                });
+                return;
+            }
+            log(this.config, `[${this.sessionId}] Connected successfully, ready for commands`);
+        } else {
+            log(this.config, `[${this.sessionId}] Response complete, ready for next command`);
+        }
+
+        this.transition('AGENT_DATA_RECEIVED');
     }
 
-    private handleErrorOccurred(_payload: unknown): void {
-        log(this.config, `[${this.sessionId}] Event: ERROR_OCCURRED (stub)`);
-        // Phase 4: Implement error handling logic
+    /**
+     * Handle ERROR_OCCURRED: error during operation
+     * Stores error for Promise bridges to retrieve, then transitions to ERROR and emits CLEANUP_REQUESTED
+     */
+    private handleErrorOccurred(payload: EventPayloads['ERROR_OCCURRED']): void {
+        this.transition('ERROR_OCCURRED');
+
+        const { error, message } = payload;
+        const errorMsg = message ?? error.message;
+        log(this.config, `[${this.sessionId}] Error occurred: ${errorMsg}`);
+
+        // Store error for Promise bridges to retrieve
+        this.lastError = error;
+
+        // Clear all timeouts
+        this.clearAllTimeouts();
+
+        // Remove multi-fire event listeners to prevent them firing during cleanup
+        this.removeListener('CLIENT_DATA_RECEIVED', this.handleClientDataReceived);
+        this.removeListener('AGENT_WRITE_OK', this.handleAgentWriteOk);
+        this.removeListener('AGENT_DATA_CHUNK', this.handleAgentDataChunk);
+        this.removeListener('AGENT_DATA_RECEIVED', this.handleAgentDataReceived);
+
+        // Emit CLEANUP_REQUESTED with hadError=true
+        this.emit('CLEANUP_REQUESTED', { hadError: true });
     }
 
-    private handleCleanupRequested(_payload: unknown): void {
-        log(this.config, `[${this.sessionId}] Event: CLEANUP_REQUESTED (stub)`);
-        // Phase 4: Implement cleanup logic
+    /**
+     * Handle CLEANUP_REQUESTED: cleanup session resources
+     * Transition: any socket-having state → CLOSING
+     * Payload indicates if cleanup is due to error (hadError=true) or graceful close (hadError=false)
+     */
+    private handleCleanupRequested(payload: EventPayloads['CLEANUP_REQUESTED']): void {
+        this.transition('CLEANUP_REQUESTED');
+
+        const { hadError } = payload;
+        log(this.config, `[${this.sessionId}] Cleanup requested (hadError=${hadError})`);
+
+        // Clear all timeouts
+        this.clearAllTimeouts();
+
+        // Remove multi-fire event listeners (may already be removed if ERROR_OCCURRED ran)
+        this.removeListener('CLIENT_DATA_RECEIVED', this.handleClientDataReceived);
+        this.removeListener('AGENT_WRITE_OK', this.handleAgentWriteOk);
+        this.removeListener('AGENT_DATA_CHUNK', this.handleAgentDataChunk);
+        this.removeListener('AGENT_DATA_RECEIVED', this.handleAgentDataReceived);
+
+        // Remove ERROR_OCCURRED listener (if not already fired via .once())
+        this.removeListener('ERROR_OCCURRED', this.handleErrorOccurred);
+
+        let cleanupError: Error | null = null;
+
+        // Cleanup socket
+        if (this.socket) {
+            try {
+                this.socket.removeAllListeners();
+                log(this.config, `[${this.sessionId}] Socket listeners removed`);
+            } catch (err) {
+                const error = err instanceof Error ? err : new Error(String(err));
+                cleanupError = cleanupError ?? error;
+                log(this.config, `[${this.sessionId}] Error removing socket listeners: ${error.message}`);
+            }
+
+            try {
+                this.socket.destroy();
+                log(this.config, `[${this.sessionId}] Socket destroyed`);
+            } catch (err) {
+                const error = err instanceof Error ? err : new Error(String(err));
+                cleanupError = cleanupError ?? error;
+                log(this.config, `[${this.sessionId}] Error destroying socket: ${error.message}`);
+            }
+
+            this.socket = null;
+        }
+
+        // Clear buffer
+        this.buffer = '';
+
+        // Emit result (BEFORE removing listeners so CLEANUP_COMPLETE/ERROR handlers can run)
+        if (cleanupError) {
+            this.emit('CLEANUP_ERROR', { error: cleanupError });
+        } else {
+            this.emit('CLEANUP_COMPLETE');
+        }
     }
 
+    /**
+     * Handle CLEANUP_COMPLETE: cleanup successful
+     * Transition: CLOSING → DISCONNECTED
+     */
     private handleCleanupComplete(): void {
-        log(this.config, `[${this.sessionId}] Event: CLEANUP_COMPLETE (stub)`);
-        // Phase 4: Implement cleanup completion logic
+        this.transition('CLEANUP_COMPLETE');
+        log(this.config, `[${this.sessionId}] Cleanup complete, session disconnected`);
     }
 
-    private handleCleanupError(_payload: unknown): void {
-        log(this.config, `[${this.sessionId}] Event: CLEANUP_ERROR (stub)`);
-        // Phase 4: Implement cleanup error handling logic
+    /**
+     * Handle CLEANUP_ERROR: cleanup failed
+     * Transition: CLOSING → DISCONNECTED (FATAL implicit)
+     */
+    private handleCleanupError(payload: EventPayloads['CLEANUP_ERROR']): void {
+        this.transition('CLEANUP_ERROR');
+
+        const { error } = payload;
+        log(this.config, `[${this.sessionId}] Cleanup error: ${error.message} (FATAL state)`);
+    }
+
+    /**
+     * Check if response is complete
+     * Complete responses end with: OK, ERR, or INQUIRE
+     */
+    private isCompleteResponse(response: string): boolean {
+        if (!response.endsWith('\n')) {
+            return false;
+        }
+
+        const lines = response.split('\n');
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            if (line.startsWith('OK ') || line === 'OK') return true;
+            if (line.startsWith('ERR ')) return true;
+            if (line.startsWith('INQUIRE ')) return true;
+
+            return false;
+        }
+
+        return false;
     }
 
     /**
@@ -360,6 +612,7 @@ export function validateTransitionTable(): Array<{ state: SessionState; event: S
     const allStates: SessionState[] = [
         'DISCONNECTED',
         'CONNECTING_TO_AGENT',
+        'SOCKET_CONNECTED',
         'READY',
         'SENDING_TO_AGENT',
         'WAITING_FOR_AGENT',
@@ -369,12 +622,11 @@ export function validateTransitionTable(): Array<{ state: SessionState; event: S
 
     const allEvents: StateEvent[] = [
         'CLIENT_CONNECT_REQUESTED',
-        'CLIENT_COMMAND_RECEIVED',
+        'CLIENT_DATA_RECEIVED',
         'AGENT_SOCKET_CONNECTED',
         'AGENT_WRITE_OK',
-        'AGENT_GREETING_RECEIVED',
         'AGENT_DATA_CHUNK',
-        'AGENT_RESPONSE_COMPLETE',
+        'AGENT_DATA_RECEIVED',
         'ERROR_OCCURRED',
         'CLEANUP_REQUESTED',
         'CLEANUP_COMPLETE',
@@ -400,12 +652,8 @@ export function validateTransitionTable(): Array<{ state: SessionState; event: S
 // Agent Proxy (Public API)
 // ============================================================================
 
-interface SessionSocket {
-    socket: net.Socket;
-}
-
 export class AgentProxy {
-    private sessions: Map<string, SessionSocket> = new Map();
+    private sessions: Map<string, AgentSessionManager> = new Map();
     private socketFactory: ISocketFactory;
     private fileSystem: IFileSystem;
     private readonly sessionTimeouts = {
@@ -430,7 +678,6 @@ export class AgentProxy {
 
     /**
      * Create session manager configuration with timeout defaults
-     * Used in Phase 3 when migrating to AgentSessionManager
      */
     private createSessionConfig(): AgentSessionManagerConfig {
         return {
@@ -442,214 +689,72 @@ export class AgentProxy {
     }
 
     /**
-     * Set up persistent error/close handlers for a session
-     * These handlers log and clean up the session if the socket fails outside of active operations
-     */
-    private setupPersistentHandlers(sessionId: string, socket: net.Socket): void {
-        // 'error' fires when the OS reports a failure (ECONNRESET, EPIPE, etc.)
-        // or when the err arg of destroy() is used
-        // node does not automatically destroy the socket on 'error' event
-        // event sequences:
-        // - OS error: 'error' -> 'close'
-        // - local destroy with arg `socket.destroy(err)`: 'error' -> 'close'
-        socket.on('error', (err) => {
-            log(this.config, `[${sessionId}] Socket error: ${err.message}`);
-        });
-
-        // 'close' fires when the socket is fully closed and resources are released
-        // hadError arg indicates if it closed because of an error
-        // event sequences:
-        // - OS error: 'error' -> 'close'
-        // - graceful remote shutdown: 'end' -> 'close'
-        // - local shutdown: socket.end() -> 'close'
-        // - local destroy without arg: socket.destroy() -> 'close'
-        socket.on('close', () => {
-            log(this.config, `[${sessionId}] Socket closed`);
-            this.sessions.delete(sessionId);
-            this.config.statusBarCallback?.();
-        });
-    }
-
-    /**
-     * Cleanup socket and session (helper for connectAgent error paths)
-     */
-    private cleanupSession(sessionId: string, socket?: net.Socket): void {
-        if (socket) {
-            socket.destroy();
-        }
-        this.sessions.delete(sessionId);
-    }
-
-    /**
      * Connect to GPG agent and return a sessionId and greeting
-     * On Windows, reads the socket file to extract port and nonce, then connects via TCP
-     * Waits for nonce to be sent and greeting to be received before returning
+     * Uses event-driven state machine with promise bridge
      */
     public async connectAgent(): Promise<{ sessionId: string; greeting: string }> {
         const sessionId = uuidv4();
-        let socket!: net.Socket;
         log(this.config, `[${sessionId}] Create session to gpg-agent...`);
 
         try {
-            // Read and parse the socket file to get port and nonce (Windows Assuan format)
+            // Read and parse the socket file to get port and nonce
             const socketData = this.fileSystem.readFileSync(this.config.gpgAgentSocketPath);
             const { port, nonce } = parseSocketFile(socketData);
 
-            log(this.config, `[${sessionId}] Found config suggesting gpg-agent at localhost:${port} and expects nonce`);
+            log(this.config, `[${sessionId}] Found config: localhost:${port} with nonce`);
 
-            // Wait for connection and send nonce
-            await new Promise<void>((resolve, reject) => {
-                const rejectWith = (error: unknown, fallbackMessage: string) => {
-                    const msg = extractErrorMessage(error, fallbackMessage);
-                    reject(new Error(msg));
-                };
+            // Create session manager
+            const sessionConfig = this.createSessionConfig();
+            const session = new AgentSessionManager(sessionId, sessionConfig, this.socketFactory);
 
-                const connectHandler = () => {
-                    log(this.config, `[${sessionId}] Connected to localhost:${port}, sending nonce...`);
-                    // Remove the one-time error handler since connection succeeded
-                    socket.removeListener('error', errorHandler);
-                    try {
-                        socket.write(nonce, (error) => {
-                            clearTimeout(connectionTimeout);
-                            if (error) {
-                                this.cleanupSession(sessionId, socket);
-                                rejectWith(error, 'Failed to send nonce');
-                            } else {
-                                resolve();
-                            }
-                        });
-                    } catch (error) {
-                        clearTimeout(connectionTimeout);
-                        this.cleanupSession(sessionId, socket);
-                        rejectWith(error, 'Failed to send nonce');
-                    }
-                };
+            // Add to sessions map
+            this.sessions.set(sessionId, session);
 
-                const errorHandler = (error: Error) => {
-                    clearTimeout(connectionTimeout);
-                    socket.removeListener('connect', connectHandler);
-                    this.cleanupSession(sessionId, socket);
-                    rejectWith(error, 'Connection error during socket setup');
-                };
-
-                const connectionTimeout = setTimeout(() => {
-                    socket.removeListener('connect', connectHandler);
-                    socket.removeListener('error', errorHandler);
-                    this.cleanupSession(sessionId, socket);
-                    rejectWith(undefined, 'Timeout: No connection and nonce sent within 5 seconds');
-                }, 5000);
-
-                // Pass connectHandler as callback to createConnection - no race condition
-                socket = this.socketFactory.createConnection({
-                    host: 'localhost',
-                    port: port
-                }, connectHandler);
-
-                // Listen for connection errors before persistent handlers
-                socket.on('error', errorHandler);
-
-                // Add to sessions map, set persistent handlers
-                this.sessions.set(sessionId, {
-                    socket: socket
-                });
-                this.setupPersistentHandlers(sessionId, socket);
+            // Register permanent cleanup listener to remove session from map
+            // This ensures cleanup works even if Promise bridges have already resolved
+            session.once('CLEANUP_COMPLETE', () => {
+                log(this.config, `[${sessionId}] Removing session from map after cleanup`);
+                this.sessions.delete(sessionId);
             });
 
-            // Wait for greeting with timeout, then verify it
-            const greeting: string = await this.waitForResponse(sessionId, false, 5000);
-            const greetingLine: string = greeting.trim();
+            // Promise bridge: wait for AGENT_DATA_RECEIVED (greeting) or CLEANUP_REQUESTED
+            // Note: ERROR_OCCURRED always emits CLEANUP_REQUESTED, so we only listen to CLEANUP
+            return await new Promise<{ sessionId: string; greeting: string }>((resolve, reject) => {
+                const handleResponse = (payload: { response: string }) => {
+                    session.removeListener('CLEANUP_REQUESTED', handleCleanup);
+                    resolve({ sessionId, greeting: payload.response });
+                };
 
-            // Verify greeting starts with OK
-            if (!greetingLine.startsWith('OK ')) {
-                throw new Error(`Invalid greeting from agent: ${greetingLine}`);
-            }
+                const handleCleanup = () => {
+                    session.removeListener('AGENT_DATA_RECEIVED', handleResponse);
+                    // Cleanup session
+                    this.sessions.delete(sessionId);
+                    // Use stored error if available, otherwise generic message
+                    const error = (session as any).lastError ?? new Error('Session closed during connection');
+                    reject(error);
+                };
 
-            // Successful connection and greeting
-            log(this.config, `[${sessionId}] Connected successfully to gpg-agent`);
-            this.config.statusBarCallback?.();
-            return { sessionId, greeting };
+                // Register listeners (no ERROR_OCCURRED - it always leads to CLEANUP_REQUESTED)
+                session.once('CLEANUP_REQUESTED', handleCleanup);
+                session.once('AGENT_DATA_RECEIVED', handleResponse);  // Greeting is first response
+
+                // Initiate connection
+                session.emit('CLIENT_CONNECT_REQUESTED', { port, nonce });
+            });
         } catch (error) {
             const msg = extractErrorMessage(error, 'Unknown error during connection');
-            const session = this.sessions.get(sessionId);
-            if (session) {
-                this.cleanupSession(sessionId, session.socket);
-            }
             log(this.config, `[${sessionId}] Connection to gpg-agent failed: ${msg}`);
+            // Clean up session if it was created
+            this.sessions.delete(sessionId);
             throw new Error(`Connection to gpg-agent failed: ${msg}`);
+        } finally {
+            this.config.statusBarCallback?.();
         }
-    }
-
-    /**
-     * Shared handler to wait for complete response from socket
-     * Accumulates data chunks and detects completion using isCompleteResponse
-     * Used by both connectAgent (greeting) and sendCommands (command responses)
-     */
-    private waitForResponse(
-        sessionId: string,
-        isInquireBlock: boolean,
-        timeoutMs?: number
-    ): Promise<string> {
-        const session = this.sessions.get(sessionId);
-        if (!session) {
-            return Promise.reject(new Error(`Invalid session: ${sessionId}`));
-        }
-
-        return new Promise((resolve, reject) => {
-            let responseData = '';
-            let timeoutHandle: NodeJS.Timeout | undefined;
-
-            if (timeoutMs) {
-                timeoutHandle = setTimeout(() => {
-                    session.socket.removeListener('data', dataHandler);
-                    session.socket.removeListener('close', closeHandler);
-                    session.socket.removeListener('error', errorHandler);
-                    this.cleanupSession(sessionId, session.socket);
-                    reject(new Error(`Response timeout after ${timeoutMs}ms`));
-                }, timeoutMs);
-            }
-
-            const dataHandler = (chunk: Buffer) => {
-                // Use latin1 to preserve raw bytes without UTF-8 mangling
-                const chunkStr = decodeProtocolData(chunk);
-                responseData += chunkStr;
-                log(this.config, `[${sessionId}] Received ${chunk.length} bytes from gpg-agent`);
-
-                // Check if we have a complete response
-                if (this.isCompleteResponse(responseData, isInquireBlock)) {
-                    if (timeoutHandle) clearTimeout(timeoutHandle);
-                    session.socket.removeListener('data', dataHandler);
-                    session.socket.removeListener('close', closeHandler);
-                    session.socket.removeListener('error', errorHandler);
-                    log(this.config, `[${sessionId}] Complete response from gpg-agent: ${sanitizeForLog(responseData)}`);
-                    resolve(responseData);
-                }
-            };
-
-            const closeHandler = () => {
-                if (timeoutHandle) clearTimeout(timeoutHandle);
-                session.socket.removeListener('data', dataHandler);
-                session.socket.removeListener('error', errorHandler);
-                reject(new Error('Socket closed unexpectedly'));
-            };
-
-            const errorHandler = (error: Error) => {
-                if (timeoutHandle) clearTimeout(timeoutHandle);
-                session.socket.removeListener('data', dataHandler);
-                session.socket.removeListener('close', closeHandler);
-                reject(new Error(`Socket error: ${error.message}`));
-            };
-
-            session.socket.on('data', dataHandler);
-            session.socket.once('close', closeHandler);
-            session.socket.once('error', errorHandler);
-        });
     }
 
     /**
      * Send command block to GPG agent and return response
-     *
-     * Command block is a complete request (e.g., "GETINFO version\n" or "D data\nEND\n")
-     * Response is all lines returned by agent until complete (buffered internally)
+     * Uses event-driven state machine with promise bridge
      */
     public async sendCommands(sessionId: string, commandBlock: string): Promise<{ response: string }> {
         const session = this.sessions.get(sessionId);
@@ -657,72 +762,45 @@ export class AgentProxy {
             return Promise.reject(new Error(`Invalid session: ${sessionId}`));
         }
 
+        // Protocol violation check: must be in READY state
+        if (session.getState() !== 'READY') {
+            const error = new Error(`Protocol violation: sendCommands called while session in ${session.getState()}`);
+            log(this.config, `[${sessionId}] ${error.message}`);
+            // Emit ERROR_OCCURRED to trigger cleanup
+            session.emit('ERROR_OCCURRED', { error });
+            return Promise.reject(error);
+        }
+
         log(this.config, `[${sessionId}] Send to gpg-agent: ${sanitizeForLog(commandBlock)}`);
 
-        try {
-            session.socket.write(commandBlock, (error) => {
-                if (error) {
-                    // Write failed asynchronously - destroy socket
-                    // This will trigger 'error' and 'close' events, causing waitForResponse to reject
-                    const msg = extractErrorMessage(error, 'Unknown error during write');
-                    log(this.config, `[${sessionId}] Send to gpg-agent failed: ${msg}`);
-                    session.socket.destroy(error);
-                }
-            });
-        } catch (error) {
-            const msg = extractErrorMessage(error, 'Unknown error during write');
-            log(this.config, `[${sessionId}] Send to gpg-agent failed (sync): ${msg}`);
-            session.socket.destroy();
-            throw new Error(`Send to gpg-agent failed: ${msg}`);
-        }
+        // Promise bridge: wait for AGENT_DATA_RECEIVED or CLEANUP_REQUESTED
+        // Note: ERROR_OCCURRED always emits CLEANUP_REQUESTED, so we only listen to CLEANUP
+        return new Promise<{ response: string }>((resolve, reject) => {
+            const handleComplete = (payload: { response: string }) => {
+                session.removeListener('CLEANUP_REQUESTED', handleCleanup);
+                resolve({ response: payload.response });
+            };
 
-        const isInquireBlock = commandBlock.startsWith('D ');
-        const response = await this.waitForResponse(sessionId, isInquireBlock);
-        return { response };
-    }
+            const handleCleanup = () => {
+                session.removeListener('AGENT_DATA_RECEIVED', handleComplete);
+                // Use stored error if available, otherwise generic message
+                const error = (session as any).lastError ?? new Error('Session closed while waiting for command response');
+                reject(error);
+            };
 
-    /**
-     * Check if response is complete
-     *
-     * Complete responses end with:
-     * - OK (for normal commands)
-     * - ERR (for errors)
-     * - INQUIRE (for inquiries, client will respond with D/END)
-     *
-     * Response format is ASCII lines ending with \n
-     */
-    private isCompleteResponse(response: string, isInquireResponse: boolean): boolean {
-        // Responses must be line-terminated
-        if (!response.endsWith('\n')) {
-            return false;
-        }
+            // Register listeners (no ERROR_OCCURRED - it always leads to CLEANUP_REQUESTED)
+            session.once('CLEANUP_REQUESTED', handleCleanup);
+            session.once('AGENT_DATA_RECEIVED', handleComplete);
 
-        // Split into lines
-        const lines = response.split('\n');
-
-        // Check last non-empty line for terminal condition
-        for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i].trim();
-            if (!line) continue;
-
-            // Terminal conditions
-            if (line.startsWith('OK ') || line === 'OK') return true;
-            if (line.startsWith('ERR ')) return true;
-            if (line.startsWith('INQUIRE ')) return true;
-
-            // For D/END blocks, we need END
-            if (isInquireResponse && line === 'END') return true;
-
-            // Found a non-terminal line, need more data
-            return false;
-        }
-
-        return false;
+            // Emit data received event
+            session.emit('CLIENT_DATA_RECEIVED', { commandBlock });
+        });
     }
 
     /**
      * Gracefully disconnect a session by sending BYE command
-     * Waits for agent response before closing socket
+     * Uses event-driven state machine with promise bridge
+     * Waits for CLEANUP_REQUESTED (socket close) rather than just BYE response
      */
     public async disconnectAgent(sessionId: string): Promise<void> {
         const session = this.sessions.get(sessionId);
@@ -732,19 +810,32 @@ export class AgentProxy {
 
         log(this.config, `[${sessionId}] Disconnect gracefully from gpg-agent...`);
 
-        try {
-            // Send BYE command and wait for response
-            await this.sendCommands(sessionId, 'BYE\n');
-            log(this.config, `[${sessionId}] Disconnected from gpg-agent`);
-        } catch (error) {
-            // If BYE fails, log but continue with cleanup
-            const msg = extractErrorMessage(error);
-            log(this.config, `[${sessionId}] Disconnect gracefully failed: ${msg}`);
-            log(this.config, `[${sessionId}] Destroying session and force closing socket to gpg-agent`);
-        } finally {
-            // Always destroy socket which fires 'close' event
-            session.socket.destroy();
-        }
+        // Promise bridge: wait for CLEANUP_REQUESTED
+        // Note: This always resolves (graceful or error cleanup), never rejects
+        // ERROR_OCCURRED always emits CLEANUP_REQUESTED, so we only listen to CLEANUP
+        return new Promise<void>((resolve, reject) => {
+            const handleDisconnected = () => {
+                // Remove session from map
+                this.sessions.delete(sessionId);
+                log(this.config, `[${sessionId}] Disconnected from gpg-agent`);
+                this.config.statusBarCallback?.();
+                resolve();
+            };
+
+            // Listen only for CLEANUP_REQUESTED (covers both graceful and error paths)
+            session.once('CLEANUP_REQUESTED', handleDisconnected);
+
+            // Send BYE command through normal flow (if state is READY)
+            if (session.getState() === 'READY') {
+                session.emit('CLIENT_DATA_RECEIVED', { commandBlock: 'BYE\n' });
+            } else {
+                // If not READY, just trigger cleanup
+                log(this.config, `[${sessionId}] Session not READY, forcing cleanup...`);
+                session.emit('ERROR_OCCURRED', {
+                    error: new Error('Disconnect called while not in READY state')
+                });
+            }
+        });
     }
 
     public isRunning(): boolean {

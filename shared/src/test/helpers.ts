@@ -66,6 +66,7 @@ export class MockSocket extends EventEmitter {
     public destroyError: Error | null = null;
     private readBuffer: Buffer[] = [];
     private _paused = false;
+    private connectTimeout: NodeJS.Timeout | null = null;
 
     write(data: Buffer | string, callback?: (err?: Error | null) => void): boolean {
         if (this.destroyed) {
@@ -112,6 +113,13 @@ export class MockSocket extends EventEmitter {
             this.destroyError = null;
             throw err;
         }
+
+        // Cancel pending connect timeout to prevent test pollution
+        if (this.connectTimeout) {
+            clearTimeout(this.connectTimeout);
+            this.connectTimeout = null;
+        }
+
         this.destroyed = true;
         const hadError = !!error;
         if (error) {
@@ -170,6 +178,10 @@ export class MockSocket extends EventEmitter {
 
     setDestroyError(error: Error): void {
         this.destroyError = error;
+    }
+
+    setConnectTimeout(timeout: NodeJS.Timeout): void {
+        this.connectTimeout = timeout;
     }
 
     clearData(): void {
@@ -339,7 +351,7 @@ export class MockSocketFactory implements ISocketFactory {
         // Simulate connection events with optional delay
         const delay = this.connectDelay || 0;
         if (delay > 0) {
-            setTimeout(() => {
+            const timeout = setTimeout(() => {
                 if (this.connectError) {
                     socket.emit('error', this.connectError);
                 } else {
@@ -349,6 +361,7 @@ export class MockSocketFactory implements ISocketFactory {
                     }
                 }
             }, delay);
+            socket.setConnectTimeout(timeout);
         } else {
             // Use setImmediate for immediate connection (preserves original behavior)
             setImmediate(() => {
