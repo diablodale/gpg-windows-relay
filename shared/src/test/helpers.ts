@@ -196,6 +196,16 @@ export class MockSocket extends EventEmitter {
         });
     }
 
+    /**
+     * Returns a promise that resolves when the next write() completes.
+     * Useful for deterministic testing of socket operations that need to wait for write completion.
+     */
+    waitForWrite(): Promise<void> {
+        return new Promise<void>((resolve) => {
+            this.afterWriteCallback = () => resolve();
+        });
+    }
+
     setRemoveAllListenersError(error: Error): void {
         this.removeAllListenersError = error;
     }

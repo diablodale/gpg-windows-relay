@@ -1250,20 +1250,24 @@ describe('AgentProxy', () => {
             const result = await connectPromise;
             const sessionId = result.sessionId;
 
-            // Start sending command (transitions to SENDING_TO_AGENT)
+            // Set up callback to know when write completes (transitions to SENDING_TO_AGENT)
+            const writeCompletePromise = socket!.waitForWrite();
+
+            // Start sending command
             const sendPromise = agentProxy.sendCommands(sessionId, 'GETINFO version\n');
-            await new Promise((resolve) => setTimeout(resolve, 20));
 
-            // Close while sending
+            // Wait for write to complete (now in SENDING_TO_AGENT state)
+            await writeCompletePromise;
+
+            // Close while in SENDING_TO_AGENT state
             socket!.end();
-            await new Promise((resolve) => setTimeout(resolve, 50));
 
-            // sendCommands should handle the closure
+            // Immediately await - promise is "handled" when rejection occurs
             try {
                 await sendPromise;
                 // May complete or may throw - both are valid depending on timing
             } catch (error: any) {
-                // Expected if close happened before write completed
+                // Expected if close happened before/during write
                 expect(error).to.exist;
             }
         });
@@ -1543,9 +1547,7 @@ describe('AgentProxy', () => {
             expect(cmdResult2.response).to.include('OK');
 
             // Cleanup: disconnect session before test ends
-            const writeCompletePromise = new Promise<void>((resolve) => {
-                socket!.afterWriteCallback = () => resolve();
-            });
+            const writeCompletePromise = socket!.waitForWrite();
             const byePromise = agentProxy.sendCommands(sessionId, 'BYE\n');
             await writeCompletePromise;  // Wait for BYE to be written
             socket!.emit('data', Buffer.from('OK closing connection\n'));
@@ -1681,9 +1683,7 @@ describe('AgentProxy', () => {
             const sessionId = result.sessionId;
 
             // Set up callback to know when write completes (transition to WAITING_FOR_AGENT)
-            const writeCompletePromise = new Promise<void>((resolve) => {
-                socket!.afterWriteCallback = () => resolve();
-            });
+            const writeCompletePromise = socket!.waitForWrite();
 
             // Send command - triggers write
             const cmdPromise = agentProxy.sendCommands(sessionId, 'VERSION\n');
