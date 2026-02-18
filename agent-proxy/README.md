@@ -6,9 +6,9 @@ VS Code extension that manages authenticated connections to a Windows GPG agent.
 
 ### State Machine Overview
 
-The agent proxy uses an **EventEmitter-based state machine** with 8 states and 10 events to manage GPG agent connections. Each session is tracked independently in a Map, allowing concurrent sessions from multiple remotes.
+The agent proxy uses an **EventEmitter-based state machine** with 9 states and 10 events to manage GPG agent connections. Each session is tracked independently in a Map, allowing concurrent sessions from multiple remotes.
 
-#### States (8 Total)
+#### States (9 Total)
 
 1. **DISCONNECTED** — No active connection, session can be created
 2. **CONNECTING_TO_AGENT** — TCP socket connection in progress
@@ -18,10 +18,11 @@ The agent proxy uses an **EventEmitter-based state machine** with 8 states and 1
 6. **WAITING_FOR_AGENT** — Accumulating response chunks from agent (greeting or command response)
 7. **ERROR** — Error occurred, cleanup needed
 8. **CLOSING** — Cleanup in progress (socket teardown, session removal)
+9. **FATAL** — Unrecoverable cleanup failure; session permanently dead
 
 Terminal states:
-- **DISCONNECTED** (can create new session)
-- Deleted from Map (unrecoverable error, session destroyed permanently)
+- **DISCONNECTED** (session removed from Map; new session can be created)
+- **FATAL** (unrecoverable cleanup failure; session removed from Map permanently)
 
 #### Events (10 Total)
 
@@ -63,6 +64,9 @@ WAITING_FOR_AGENT            │
 
 Error from any state:
   → ERROR_OCCURRED → ERROR → CLEANUP_REQUESTED → CLOSING → DISCONNECTED
+
+Cleanup failure:
+  → CLEANUP_ERROR → FATAL (permanent dead end, session removed from Map)
 ```
 
 ### Socket Close Handling
@@ -272,7 +276,7 @@ All errors converge to a single `ERROR_OCCURRED` event:
 2. Transition to ERROR state
 3. Reject pending promise (if any)
 4. Emit `CLEANUP_REQUESTED` with `{hadError: true}`
-5. Transition to CLOSING → cleanup → DISCONNECTED
+5. Transition to CLOSING → cleanup → DISCONNECTED (success) or FATAL (cleanup failure)
 
 **First-Error-Wins Cleanup:**  
 Cleanup continues even if one step fails (e.g., `removeAllListeners()` throws). The first error is captured and logged, but cleanup continues to release all resources.
