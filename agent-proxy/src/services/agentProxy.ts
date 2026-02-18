@@ -109,7 +109,7 @@ export interface EventPayloads {
     CLIENT_CONNECT_REQUESTED: { port: number; nonce: Buffer };
     CLIENT_DATA_RECEIVED: { commandBlock: string | Buffer };
     AGENT_SOCKET_CONNECTED: undefined;
-    AGENT_WRITE_OK: undefined;
+    AGENT_WRITE_OK: { requiresTimeout: boolean };  // Context: nonce (true) vs command (false)
     AGENT_DATA_CHUNK: { chunk: string };
     AGENT_DATA_RECEIVED: { response: string };
     ERROR_OCCURRED: { error: Error; message?: string };
@@ -131,9 +131,10 @@ export interface AgentProxyConfig extends LogConfig {
  * Per-session configuration
  */
 export interface AgentSessionManagerConfig extends LogConfig {
-    connectionTimeoutMs: number;    // Default: 5000
-    greetingTimeoutMs: number;      // Default: 5000
-    responseTimeoutMs: number;      // Default: 30000
+    connectionTimeoutMs: number;    // Default: 5000 - network operation timeout
+    greetingTimeoutMs: number;      // Default: 5000 - nonce authentication timeout
+    // No response timeout - commands can be interactive (password prompts, INQUIRE)
+    // Network failures detected via socket 'close' event
 }
 
 /**
@@ -158,8 +159,8 @@ export class AgentSessionManager extends EventEmitter {
     private socket: net.Socket | null = null;
     private buffer: string = '';
     private connectionTimeout: NodeJS.Timeout | null = null;
-    private greetingTimeout: NodeJS.Timeout | null = null;
-    private responseTimeout: NodeJS.Timeout | null = null;
+    private agentDataTimeout: NodeJS.Timeout | null = null;     // timeout for agent to respond, usually used for greeting response
+    // No responseTimeout - commands can be interactive (password prompts via pinentry)
     private lastError: Error | null = null;  // Stores error for Promise bridges to retrieve
 
     constructor(
@@ -179,7 +180,7 @@ export class AgentSessionManager extends EventEmitter {
 
         // Multi-fire events (can occur multiple times per session)
         this.on('CLIENT_DATA_RECEIVED', (payload) => this.handleClientDataReceived(payload));
-        this.on('AGENT_WRITE_OK', () => this.handleAgentWriteOk());
+        this.on('AGENT_WRITE_OK', (payload) => this.handleAgentWriteOk(payload));
         this.on('AGENT_DATA_CHUNK', (payload) => this.handleAgentDataChunk(payload));
         this.on('AGENT_DATA_RECEIVED', (payload) => this.handleAgentDataReceived(payload));
 
@@ -254,31 +255,27 @@ export class AgentSessionManager extends EventEmitter {
     }
 
     /**
-     * Handle AGENT_WRITE_OK: write completed successfully
-     * Transition: SENDING_TO_AGENT → WAITING_FOR_AGENT
-     * Sets response timeout (greeting or command response)
+     * Handle AGENT_WRITE_OK: data written to agent successfully
+     * Transition: SOCKET_CONNECTED → WAITING_FOR_AGENT (after nonce)
+     * Transition: SENDING_TO_AGENT → WAITING_FOR_AGENT (after command)
      */
-    private handleAgentWriteOk(): void {
+    private handleAgentWriteOk(payload: EventPayloads['AGENT_WRITE_OK']): void {
         this.transition('AGENT_WRITE_OK');
         log(this.config, `[${this.sessionId}] Write completed, waiting for response...`);
 
-        // Set response timeout (use greetingTimeout for first response, responseTimeout for subsequent)
-        const isFirstResponse = !this.greetingTimeout && !this.responseTimeout;
-        const timeoutMs = isFirstResponse ? this.config.greetingTimeoutMs : this.config.responseTimeoutMs;
-        const timeoutName = isFirstResponse ? 'Greeting' : 'Response';
+        // Only set greeting timeout for nonce authentication (requiresTimeout=true)
+        // NO timeout for command responses - they can be interactive (password prompts, INQUIRE)
+        const { requiresTimeout } = payload;
 
-        const timeout = setTimeout(() => {
-            log(this.config, `[${this.sessionId}] ${timeoutName} timeout after ${timeoutMs}ms`);
-            this.emit('ERROR_OCCURRED', {
-                error: new Error(`${timeoutName} timeout after ${timeoutMs}ms`)
-            });
-        }, timeoutMs);
-
-        if (isFirstResponse) {
-            this.greetingTimeout = timeout;
-        } else {
-            this.responseTimeout = timeout;
+        if (requiresTimeout) {
+            this.agentDataTimeout = setTimeout(() => {
+                log(this.config, `[${this.sessionId}] Greeting timeout after ${this.config.greetingTimeoutMs}ms`);
+                this.emit('ERROR_OCCURRED', {
+                    error: new Error(`Greeting timeout after ${this.config.greetingTimeoutMs}ms`)
+                });
+            }, this.config.greetingTimeoutMs);
         }
+        // For command responses: no timeout, rely on socket 'close' for network failures
     }
 
     /**
@@ -309,7 +306,8 @@ export class AgentSessionManager extends EventEmitter {
                 log(this.config, `[${this.sessionId}] Write failed: ${error.message}`);
                 this.emit('ERROR_OCCURRED', { error });
             } else {
-                this.emit('AGENT_WRITE_OK');
+                // Nonce requires timeout, commands do not (can be interactive)
+                this.emit('AGENT_WRITE_OK', { requiresTimeout: isNonce });
             }
         });
     }
@@ -329,14 +327,10 @@ export class AgentSessionManager extends EventEmitter {
         if (this.isCompleteResponse(this.buffer)) {
             log(this.config, `[${this.sessionId}] Complete response: ${sanitizeForLog(this.buffer)}`);
 
-            // Clear appropriate timeout
-            if (this.greetingTimeout) {
-                clearTimeout(this.greetingTimeout);
-                this.greetingTimeout = null;
-            }
-            if (this.responseTimeout) {
-                clearTimeout(this.responseTimeout);
-                this.responseTimeout = null;
+            // Clear greeting timeout if set (only set for nonce authentication)
+            if (this.agentDataTimeout) {
+                clearTimeout(this.agentDataTimeout);
+                this.agentDataTimeout = null;
             }
 
             // Emit AGENT_DATA_RECEIVED (unified event for greeting and command responses)
@@ -566,20 +560,17 @@ export class AgentSessionManager extends EventEmitter {
     }
 
     /**
-     * Clear all timeouts
+     * Clear all active timeouts (connection and greeting only)
+     * No response timeout - commands can require indefinite human interaction
      */
     private clearAllTimeouts(): void {
         if (this.connectionTimeout) {
             clearTimeout(this.connectionTimeout);
             this.connectionTimeout = null;
         }
-        if (this.greetingTimeout) {
-            clearTimeout(this.greetingTimeout);
-            this.greetingTimeout = null;
-        }
-        if (this.responseTimeout) {
-            clearTimeout(this.responseTimeout);
-            this.responseTimeout = null;
+        if (this.agentDataTimeout) {
+            clearTimeout(this.agentDataTimeout);
+            this.agentDataTimeout = null;
         }
     }
 }
@@ -641,9 +632,9 @@ export class AgentProxy {
     private socketFactory: ISocketFactory;
     private fileSystem: IFileSystem;
     private readonly sessionTimeouts = {
-        connection: 5000,
-        greeting: 5000,
-        response: 30000     // BUGBUG due to pinentry and humans it is unknown and likely unwise to set this timeout
+        connection: 5000,   // Non-interactive network operation
+        greeting: 5000      // Non-interactive nonce authentication
+        // No response timeout - commands can be interactive (password prompts, INQUIRE)
     };
 
     constructor(private config: AgentProxyConfig, deps?: Partial<AgentProxyDeps>) {
@@ -667,8 +658,7 @@ export class AgentProxy {
         return {
             ...this.config,
             connectionTimeoutMs: this.sessionTimeouts.connection,
-            greetingTimeoutMs: this.sessionTimeouts.greeting,
-            responseTimeoutMs: this.sessionTimeouts.response
+            greetingTimeoutMs: this.sessionTimeouts.greeting
         };
     }
 

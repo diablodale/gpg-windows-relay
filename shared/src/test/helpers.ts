@@ -181,6 +181,21 @@ export class MockSocket extends EventEmitter {
         this.emit('error', error);
     }
 
+    /**
+     * Emit data after a delay (simulates slow agent response, e.g., interactive password prompt)
+     * Returns a promise that resolves when data is emitted
+     */
+    emitDataDelayed(data: Buffer, delayMs: number): Promise<void> {
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                if (!this.destroyed) {
+                    this.emit('data', data);
+                }
+                resolve();
+            }, delayMs);
+        });
+    }
+
     setRemoveAllListenersError(error: Error): void {
         this.removeAllListenersError = error;
     }

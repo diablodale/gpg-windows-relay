@@ -172,6 +172,11 @@ Gpg4win's Assuan socket file contains:
 5. Agent proxy sends 16-byte nonce for authentication
 6. Data pipes bidirectionally
 
+**Passthrough Design:**
+
+Both extensions act as **transparent byte-stream proxies** - they inspect the protocol stream to manage connection state (detecting command boundaries, INQUIRE responses, etc.) but **never modify the data**. All socket I/O uses `latin1` encoding to preserve raw bytes (0x00-0xFF) exactly, ensuring binary data (signatures, encrypted blocks, nonces) passes through unchanged. The code external to this
+project (e.g GPG client and agent) handle all Assuan protocol semantics (percent encoding, UTF-8 text, line length limits).
+
 **Termination:**
 
 Immediate disconnect if either side closes

@@ -6,7 +6,7 @@ Refactor `agent-proxy` VSCode extension from its current implementation to an Ev
 having model and style that matches the [request-proxy extension refactor](request-state-machine-refactor.md)
 that was recently completed.
 
-**TL;DR**: Refactor agent-proxy from implicit promise-based flow to explicit EventEmitter state machine with 8 states and 10 events, matching the architecture successfully implemented in request-proxy. Key improvements: 30s command timeouts, concurrent command prevention via protocol error, explicit state tracking, comprehensive test coverage (target >80%), and shared code extraction during refactor. **Key insight**: BYE is just a normal command - reuse SENDING_TO_AGENT → WAITING_FOR_AGENT → READY flow. **CRITICAL**: Node.js socket 'close' event can fire in ANY state where socket exists (CONNECTING_TO_AGENT, SOCKET_CONNECTED, READY, SENDING_TO_AGENT, WAITING_FOR_AGENT, ERROR, CLOSING), not just expected states. Handler must be defensive, check current state, and route based on hadError parameter: transmission errors → ERROR → CLOSING, clean closes → CLOSING directly via CLEANUP_REQUESTED. Must handle gracefully in ALL socket-having states. Socket close handler designed to be robust but will require adjustment during implementation. The simpler flow (no INQUIRE management, persistent multi-session model, unified disconnect handling) requires fewer states (8 vs 12 in request-proxy) but maintains the same architectural rigor.
+**TL;DR**: Refactor agent-proxy from implicit promise-based flow to explicit EventEmitter state machine with 8 states and 10 events, matching the architecture successfully implemented in request-proxy. Key improvements: connection (5s) and greeting (5s) timeouts with NO response timeout to support interactive operations (password prompts, INQUIRE), concurrent command prevention via protocol error, explicit state tracking, comprehensive test coverage (target >80%), and shared code extraction during refactor. **Key insight**: BYE is just a normal command - reuse SENDING_TO_AGENT → WAITING_FOR_AGENT → READY flow. **CRITICAL**: Node.js socket 'close' event can fire in ANY state where socket exists (CONNECTING_TO_AGENT, SOCKET_CONNECTED, READY, SENDING_TO_AGENT, WAITING_FOR_AGENT, ERROR, CLOSING), not just expected states. Handler must be defensive, check current state, and route based on hadError parameter: transmission errors → ERROR → CLOSING, clean closes → CLOSING directly via CLEANUP_REQUESTED. Must handle gracefully in ALL socket-having states. Socket close handler designed to be robust but will require adjustment during implementation. The simpler flow (no INQUIRE management, persistent multi-session model, unified disconnect handling) requires fewer states (8 vs 12 in request-proxy) but maintains the same architectural rigor.
 
 ---
 
@@ -82,12 +82,13 @@ Events drive state transitions with consolidated error handling pattern from req
 Events describe "what happened" not "what to do". CLIENT_DATA_RECEIVED means data received from client (nonce or command). AGENT_DATA_RECEIVED means complete response received from agent (greeting or command response). AGENT_WRITE_OK means socket write completed successfully. This naming makes event sources and meanings immediately clear.
 
 **Error Consolidation** (matches request-proxy pattern):
-- Connection timeout → ERROR_OCCURRED
+- Connection timeout → ERROR_OCCURRED (5s for network operations)
+- Greeting timeout → ERROR_OCCURRED (5s for nonce authentication)
 - Write failure (nonce or command) → ERROR_OCCURRED
 - Invalid greeting (first response validation) → ERROR_OCCURRED
-- Response timeout → ERROR_OCCURRED (30s default)
 - Socket errors → ERROR_OCCURRED
 - Protocol violations (concurrent commands) → ERROR_OCCURRED
+- **No response timeout** - commands can be interactive (password prompts, INQUIRE). Network failures detected via socket 'close' event
 
 ---
 
@@ -1969,7 +1970,7 @@ async disconnectAgent(sessionId: string): Promise<void> {
 #### Timeout Handling (5 tests)
 - [x] Test **connection timeout** (5s) emits ERROR_OCCURRED — line 865
 - [x] Test **greeting timeout** (5s) emits ERROR_OCCURRED — line 887
-- [ ] Test **response timeout** (30s)
+- [NA] ~~Test **response timeout** (30s)~~ — **NO response timeout** - commands can be interactive (password prompts, INQUIRE). Network failures detected via socket 'close' event. See "Key Design Decisions: Timeout Strategy for Interactive Operations"
 - [NA] Test timeout cleared on successful response — implicit in all successful command tests
 - [NA] Test timeout cleanup in ERROR state — implicit in timeout tests (ERROR → CLEANUP → clear)
 
@@ -2039,6 +2040,93 @@ async disconnectAgent(sessionId: string): Promise<void> {
 
 ---
 
+### Phase 7.1: Remove Response Timeout for Interactive Operations ✅ COMPLETE
+**File:** `agent-proxy/src/services/agentProxy.ts`
+
+**Status:** Complete. Response timeout removed to support interactive GPG operations requiring indefinite human response time.
+
+**Rationale:**
+GPG operations frequently require human interaction with no predictable timeout:
+1. **Password prompts:** gpg-agent spawns pinentry → waits indefinitely for user to enter password
+2. **INQUIRE responses:** Client may prompt human for data → indefinite wait time
+3. **Smartcard operations:** PIN entry, confirmations, physical device interaction
+4. **Passphrase caching:** First operation prompts (slow), subsequent cached (fast) → unpredictable timing
+
+As passthrough proxies, we cannot distinguish between:
+- Network timeout (connection lost) vs Human processing delay (user thinking/typing)
+- Fast cached operation vs slow interactive operation
+
+**Solution:**
+- **Keep connection timeout (5s):** Non-interactive network operation
+- **Keep greeting timeout (5s):** Non-interactive nonce authentication  
+- **Remove response timeout:** Support indefinite human interaction
+- **Network failure detection:** Rely on socket 'close' event (TCP layer handles connection loss)
+
+**Implementation Changes:**
+
+**Interface & Configuration:**
+- Removed `responseTimeoutMs` from `AgentSessionManagerConfig` interface (line 136)
+- Removed `response: 30000` from `sessionTimeouts` configuration (line 643-647)
+- Updated `createSessionConfig()` to not include responseTimeoutMs (line 665-670)
+
+**Session Manager:**
+- Removed `responseTimeout` property from `AgentSessionManager` (line 162)
+- Updated `handleAgentWriteOk()` (line 257-277):
+  - Only sets greeting timeout for first response (after nonce)
+  - No timeout for command responses (interactive operations)
+  - Added comment: "For command responses: no timeout, rely on socket 'close' for network failures"
+- Updated `handleAgentDataChunk()` (line 329-335):
+  - Only clears greeting timeout (no responseTimeout to clear)
+- Updated `clearAllTimeouts()` (line 565-577):
+  - Only clears connection and greeting timeouts
+  - Added comment: "No response timeout - commands can require indefinite human interaction"
+
+**Network Failure Handling:**
+All network failures detected through existing socket 'close' event mechanism:
+- Connection lost → socket closes → 'close' event → CLEANUP_REQUESTED → proper error handling (Phase 3.3)
+- Agent crash → socket closes → same flow
+- TCP keepalive handles hung connections at network layer
+
+**Verification:**
+- ✅ All 51 tests still passing (no response timeout tests to update)
+- ✅ TypeScript compilation successful (no type errors)
+- ✅ Connection and greeting timeouts still functional
+- ✅ Network failure detection unchanged (socket close events)
+
+**Documentation Updates:**
+- Updated Key Design Decision #1: "Timeout Strategy for Interactive Operations"
+- Updated Phase 7 status: Response timeout marked as [REMOVED] by design
+- Updated Success Criteria: Removed "command timeouts (30s NEW) fire correctly"
+
+**Benefits:**
+1. ✅ Supports password prompts via pinentry (can take minutes)
+2. ✅ Supports INQUIRE responses requiring human input (indefinite time)
+3. ✅ Supports smartcard operations (PIN entry, confirmations)
+4. ✅ Supports any GPG operation with user interaction
+5. ✅ Network failures still detected via socket close
+6. ✅ No arbitrary timeout killing legitimate operations
+
+**Interactive Operations Testing (2 new tests):**
+- [x] Test long response delay for interactive operations (simulates password prompts) — line 1717-1771
+  - Uses MockSocket.emitDataDelayed() to simulate delayed response (25 second delay)
+  - Verifies command completes successfully despite delay (no timeout)
+  - Simulates: gpg-agent spawns pinentry → human enters password → response sent
+- [x] Test multiple sequential commands with varying delays — line 1773-1824
+  - First command: 6 second delayed response (simulates password prompt)
+  - Second command: 6 second delayed response (simulates confirmation prompt)
+  - Third command: instant response (simulates cached password)
+  - Verifies all commands succeed regardless of timing
+
+**Shared Test Infrastructure Enhancement:**
+- Added `MockSocket.emitDataDelayed(data: Buffer, delayMs: number): Promise<void>` to shared/src/test/helpers.ts
+- Enables simulation of slow agent responses for interactive operations
+- Returns promise that resolves when data is emitted (for test sequencing)
+
+**Test Count:** 51 → 53 tests (+2 interactive operations tests) ✅  
+**Deliverable:** ✅ Interactive operations fully supported and tested, network failure detection intact
+
+---
+
 ### Phase 8: Testing - Concurrent Sessions & Integration
 **File:** `agent-proxy/src/test/agentProxy.test.ts`
 
@@ -2066,7 +2154,7 @@ async disconnectAgent(sessionId: string): Promise<void> {
 - [x] Test agent crash (socket close with hadError=true) during command — line 1172 (socket error during connection)
 - [ ] Test cleanup failure transitions to ERROR (handleCleanupError path)
 
-**Target:** +9 tests needed (5 session management + 2 end-to-end + 2 error recovery) → 45 current + 12 Phase 7 + 9 Phase 8 = 66 total  
+**Target:** +9 tests needed (5 session management + 2 end-to-end + 2 error recovery) → 53 current (after Phase 7 & 7.1) + 9 Phase 8 = 62 total  
 **Deliverable:** ✅ Production-ready, multi-session validated, comprehensive integration coverage
 
 ---
@@ -2158,7 +2246,8 @@ Extract duplicate code discovered during refactor to shared package:
 - [ ] All 109 request-proxy tests still pass (shared code changes compatible)
 - [ ] Manual testing: GPG signing workflow successful
 - [ ] Multi-session testing: 3+ concurrent sessions work correctly
-- [ ] Timeout testing: Connection, greeting, and command timeouts (30s NEW) fire correctly
+- [ ] Timeout testing: Connection (5s) and greeting (5s) timeouts fire correctly. NO response timeout (supports interactive operations)
+- [ ] Interactive operations: Password prompts via pinentry, INQUIRE responses work without timeout (indefinite wait supported)
 - [ ] Protocol violation testing: Concurrent commands rejected with clear error
 - [ ] Socket close testing: Both hadError=true and hadError=false paths work
 - [ ] BYE command testing: Graceful disconnect flows through normal command path
@@ -2184,7 +2273,7 @@ Extract duplicate code discovered during refactor to shared package:
 
 ### Performance ✅
 - [ ] No regressions in connection time (<5s for typical connection)
-- [ ] Response timeout (30s) doesn't add overhead to normal operations
+- [ ] No timeout overhead for command responses (supports indefinite interactive operations)
 - [ ] Memory usage stable under load (long-running sessions, many sessions)
 - [ ] Session Map cleanup prevents memory leaks
 
@@ -2192,10 +2281,32 @@ Extract duplicate code discovered during refactor to shared package:
 
 ## Key Design Decisions
 
-### 1. Command Timeout ✅
-**Decision:** Add 30s default timeout for sendCommands()  
-**Rationale:** Current implementation can hang indefinitely. Matches GPG agent typical behavior. Configurable for special cases.  
-**Implementation:** `setTimeout()` in `handleSending`, clear in `handleWaitingForAgent` or ERROR
+### 1. Timeout Strategy for Interactive Operations ✅
+**Decision:** NO response timeout for commands. Only timeout non-interactive operations (connection, greeting).
+
+**Rationale:**
+- **Connection timeout (5s):** ✅ Network operation, should complete quickly
+- **Greeting timeout (5s):** ✅ Nonce authentication, non-interactive  
+- **Response timeout:** ❌ REMOVED - Commands can be interactive (password prompts, confirmations)
+- GPG operations often require human interaction:
+  1. **Signing:** gpg-agent spawns pinentry → waits for password → indefinite time
+  2. **INQUIRE responses:** Client may prompt human → indefinite time
+  3. **Passphrase caching:** First operation prompts, subsequent cached → unpredictable timing
+- As passthrough proxies, we cannot distinguish network timeouts from human processing delays
+- TCP layer handles network failures (connection loss detected via socket 'close')
+- Socket 'close' event provides network failure detection without arbitrary timeouts
+
+**Implementation:**
+- Connection timeout: `setTimeout()` in `handleClientConnectRequested`, clear in `handleAgentSocketConnected` or ERROR
+- Greeting timeout: `setTimeout()` in `handleAgentWriteOk` (first response only), clear when greeting received
+- **NO timeout** in `handleAgentWriteOk` for non-greeting responses (interactive operations)
+- Rely on socket 'close' event for network failure detection
+
+**Why This Works:**
+- Human operations: No timeout, can take hours if needed
+- Network failures: Socket closes → 'close' event → CLEANUP_REQUESTED → proper error handling
+- Process crashes: Socket closes → same flow as network failure
+- Hung connections: Rare (TCP keepalive handles this), acceptable tradeoff for supporting interactive operations
 
 ### 2. Concurrent Commands ✅
 **Decision:** Disallow and treat as protocol error  

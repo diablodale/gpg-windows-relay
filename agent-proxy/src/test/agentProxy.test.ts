@@ -30,6 +30,16 @@ describe('AgentProxy', () => {
         mockFileSystem.setFile(socketPath, socketFileContent);
     });
 
+    afterEach(() => {
+        // Clean up all sockets to prevent test pollution (lingering timeouts, event listeners)
+        const sockets = mockSocketFactory.getSockets();
+        sockets.forEach(socket => {
+            if (!socket.destroyed) {
+                socket.destroy();
+            }
+        });
+    });
+
     describe('connectAgent', () => {
         it('should read socket file and parse port/nonce', async () => {
             const agentProxy = new AgentProxy(
@@ -1023,6 +1033,7 @@ describe('AgentProxy', () => {
             // Emit socket error
             socket!.emit('error', new Error('Socket error during response'));
 
+            // Immediately await promise - it's "handled" when rejection occurs
             try {
                 await commandPromise;
                 expect.fail('Should have thrown socket error');
@@ -1056,6 +1067,7 @@ describe('AgentProxy', () => {
             // Set write error on the socket directly after connection
             socket!.setWriteError(new Error('Command write failed'));
 
+            // Immediately await - promise is "handled" when rejection occurs
             try {
                 await agentProxy.sendCommands(sessionId, 'TEST\n');
                 expect.fail('Should have thrown write error');
@@ -1353,7 +1365,6 @@ describe('AgentProxy', () => {
 
             // Close cleans up
             socket!.end();
-            await new Promise((resolve) => setTimeout(resolve, 30));
         });
 
         it('should pass hadError parameter through cleanup chain', async () => {
@@ -1381,7 +1392,6 @@ describe('AgentProxy', () => {
 
             // Destroy without error (clean destroy)
             socket!.destroy();
-            await new Promise((resolve) => setTimeout(resolve, 50));
 
             // Verify cleanup occurred (socket closed)
             const cleanupLogs = logs.filter(log => log.includes('Agent socket closed') || log.includes('closed'));
@@ -1409,9 +1419,8 @@ describe('AgentProxy', () => {
 
             // Close before greeting received (during AGENT_CONNECTING state)
             socket!.end();
-            await new Promise((resolve) => setTimeout(resolve, 50));
 
-            // connectAgent should reject
+            // Immediately await - promise is "handled" when rejection occurs
             try {
                 await connectPromise;
                 expect.fail('Should have rejected on early close');
@@ -1449,17 +1458,17 @@ describe('AgentProxy', () => {
 
             // Close from SENDING_TO_AGENT state
             socket!.end();
-            await new Promise((resolve) => setTimeout(resolve, 50));
 
-            // Should log socket closure and cleanup
-            const closingLogs = logs.filter(log => log.includes('closed') || log.includes('CLOSING') || log.includes('DISCONNECTED'));
-            expect(closingLogs.length).to.be.greaterThan(0);
-
+            // Immediately await promise - it's "handled" when rejection occurs
             try {
                 await sendPromise;
             } catch (error: any) {
                 // Expected if socket closed before write completed
             }
+
+            // Should log socket closure and cleanup
+            const closingLogs = logs.filter(log => log.includes('closed') || log.includes('CLOSING') || log.includes('DISCONNECTED'));
+            expect(closingLogs.length).to.be.greaterThan(0);
         });
     });
 
@@ -1532,6 +1541,16 @@ describe('AgentProxy', () => {
 
             const cmdResult2 = await commandPromise2;
             expect(cmdResult2.response).to.include('OK');
+
+            // Cleanup: disconnect session before test ends
+            const writeCompletePromise = new Promise<void>((resolve) => {
+                socket!.afterWriteCallback = () => resolve();
+            });
+            const byePromise = agentProxy.sendCommands(sessionId, 'BYE\n');
+            await writeCompletePromise;  // Wait for BYE to be written
+            socket!.emit('data', Buffer.from('OK closing connection\n'));
+            await byePromise;  // Wait for response processing
+            socket!.emit('close', false);
         });
 
         it('should handle socket close after transition to READY (slow close race)', async () => {
@@ -1661,15 +1680,21 @@ describe('AgentProxy', () => {
             const result = await connectPromise;
             const sessionId = result.sessionId;
 
-            // Send command to transition to WAITING_FOR_AGENT
+            // Set up callback to know when write completes (transition to WAITING_FOR_AGENT)
+            const writeCompletePromise = new Promise<void>((resolve) => {
+                socket!.afterWriteCallback = () => resolve();
+            });
+
+            // Send command - triggers write
             const cmdPromise = agentProxy.sendCommands(sessionId, 'VERSION\n');
-            await new Promise((resolve) => setTimeout(resolve, 10));
 
-            // Socket closes with error while waiting for response
+            // Wait for write to actually complete
+            await writeCompletePromise;
+
+            // NOW destroy socket while in WAITING_FOR_AGENT state
             socket!.destroy(new Error('Connection lost'));
-            await new Promise((resolve) => setTimeout(resolve, 50));
 
-            // Command should reject
+            // Immediately await - promise is "handled" right when rejection occurs
             try {
                 await cmdPromise;
                 expect.fail('Should have rejected due to socket error');
@@ -1710,6 +1735,140 @@ describe('AgentProxy', () => {
             // Verify error was logged
             const errorLogs = logs.filter(log => log.includes('Connection to gpg-agent failed'));
             expect(errorLogs.length).to.be.greaterThan(0);
+        });
+    });
+
+    describe('Phase 7.1: Interactive Operations', () => {
+        it('should support long response delays for interactive operations (simulates password prompts)', async function() {
+            // Set Mocha timeout to accommodate potential delays
+            this.timeout(30000); // 30 seconds
+
+            const logs: string[] = [];
+            const agentProxy = new AgentProxy(
+                {
+                    logCallback: (msg) => logs.push(msg),
+                    gpgAgentSocketPath: socketPath,
+                    statusBarCallback: undefined
+                },
+                {
+                    fileSystem: mockFileSystem,
+                    socketFactory: mockSocketFactory
+                }
+            );
+
+            // Step 1: Connect to agent
+            const connectPromise = agentProxy.connectAgent();
+            await new Promise((resolve) => setTimeout(resolve, 10));
+
+            // Step 2: Agent sends greeting
+            const socket = mockSocketFactory.getLastSocket();
+            socket!.emit('data', Buffer.from('OK GPG-Agent\n'));
+
+            // Step 3: Connection completes, session is READY
+            const result = await connectPromise;
+            const sessionId = result.sessionId;
+            expect(result.greeting).to.equal('OK GPG-Agent\n');
+
+            // Step 4: Send VERSION command
+            const versionPromise = agentProxy.sendCommands(sessionId, 'VERSION\n');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+
+            // Step 5: Agent responds after 10 second delay (simulates interactive operation)
+            await socket!.emitDataDelayed(Buffer.from('OK 2.2.19\n'), 15000);
+
+            // Step 6: Get VERSION result
+            const versionResult = await versionPromise;
+            expect(versionResult.response).to.equal('OK 2.2.19\n');
+
+            // Step 7: Send BYE using sendCommands to capture response
+            const byePromise = agentProxy.sendCommands(sessionId, 'BYE\n');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+
+            // Step 8: Verify BYE command was sent to agent
+            const writtenData = socket!.getWrittenData().toString('latin1');
+            expect(writtenData).to.include('BYE\n');
+
+            // Step 9: Agent responds to BYE
+            socket!.emit('data', Buffer.from('OK closing connection\n'));
+
+            // Get BYE response
+            const byeResult = await byePromise;
+
+            // Verify client received "OK closing connection\n" response
+            expect(byeResult.response).to.equal('OK closing connection\n');
+
+            // Close socket (agent closes after BYE)
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            socket!.emit('close', false);
+
+            // Step 10: Verify cleanup
+            expect(agentProxy.isRunning()).to.equal(false);
+            expect(agentProxy.getSessionCount()).to.equal(0);
+        });
+
+        it('should support multiple sequential commands with long delays', async function() {
+            // Set Mocha timeout to accommodate 2 x 6 second delays = ~12 seconds total
+            this.timeout(20000); // 20 seconds
+
+            // Verifies that NO response timeout allows multiple interactive operations in sequence
+            const DELAY_MS = 6000; // 6 seconds - simulates real interactive operations
+
+            const agentProxy = new AgentProxy(
+                {
+                    logCallback: () => {},
+                    gpgAgentSocketPath: socketPath,
+                    statusBarCallback: undefined
+                },
+                {
+                    fileSystem: mockFileSystem,
+                    socketFactory: mockSocketFactory
+                }
+            );
+
+            // Connect to agent
+            const connectPromise = agentProxy.connectAgent();
+            await new Promise((resolve) => setTimeout(resolve, 10));
+
+            const socket = mockSocketFactory.getLastSocket();
+            socket!.emit('data', Buffer.from('OK GPG-Agent\n'));
+
+            const result = await connectPromise;
+            const sessionId = result.sessionId;
+            expect(result.greeting).to.equal('OK GPG-Agent\n');
+
+            // First command - with 6 second delay (simulates password prompt)
+            const cmd1Promise = agentProxy.sendCommands(sessionId, 'SIGN doc1.txt\n');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            await socket!.emitDataDelayed(Buffer.from('OK Signed\n'), DELAY_MS);
+            const cmd1Result = await cmd1Promise;
+            expect(cmd1Result.response).to.equal('OK Signed\n');
+
+            // Second command - with 6 second delay (may still prompt for confirmation)
+            const cmd2Promise = agentProxy.sendCommands(sessionId, 'SIGN doc2.txt\n');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            await socket!.emitDataDelayed(Buffer.from('OK Signed\n'), DELAY_MS);
+            const cmd2Result = await cmd2Promise;
+            expect(cmd2Result.response).to.equal('OK Signed\n');
+
+            // Third command - instant response (cached password)
+            const cmd3Promise = agentProxy.sendCommands(sessionId, 'GETINFO version\n');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            socket!.emit('data', Buffer.from('D 2.2.19\nOK\n'));
+            const cmd3Result = await cmd3Promise;
+            expect(cmd3Result.response).to.equal('D 2.2.19\nOK\n');
+
+            // All commands should succeed regardless of timing
+            expect(agentProxy.isRunning()).to.equal(true);
+
+            // Cleanup
+            const byePromise = agentProxy.sendCommands(sessionId, 'BYE\n');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            socket!.emit('data', Buffer.from('OK closing connection\n'));
+            await byePromise;
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            socket!.emit('close', false);
+
+            expect(agentProxy.isRunning()).to.equal(false);
         });
     });
 
