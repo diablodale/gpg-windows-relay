@@ -2,8 +2,8 @@
  * Request Proxy Service - State Machine Implementation
  *
  * Creates a Unix socket server on the GPG agent socket path.
- * Implements a 12-state finite state machine to handle GPG Assuan protocol:
- *   DISCONNECTED → CLIENT_CONNECTED → AGENT_CONNECTING → READY
+ * Implements an 11-state finite state machine to handle GPG Assuan protocol:
+ *   DISCONNECTED → CONNECTING_TO_AGENT → READY
  *   READY ↔ BUFFERING_COMMAND → SENDING_TO_AGENT ↔ WAITING_FOR_AGENT ↔ SENDING_TO_CLIENT
  *   READY ↔ BUFFERING_INQUIRE → SENDING_TO_AGENT
  *   Any state → ERROR → CLOSING → DISCONNECTED or FATAL
@@ -26,12 +26,11 @@ import { VSCodeCommandExecutor } from './commandExecutor';
 // ============================================================================
 
 /**
- * Client session states (12 total)
+ * Client session states (11 total)
  */
 type SessionState =
   | 'DISCONNECTED'
-  | 'CLIENT_CONNECTED'
-  | 'AGENT_CONNECTING'
+  | 'CONNECTING_TO_AGENT'
   | 'READY'
   | 'BUFFERING_COMMAND'
   | 'BUFFERING_INQUIRE'
@@ -43,12 +42,11 @@ type SessionState =
   | 'FATAL';
 
 /**
- * State machine events (14 total)
+ * State machine events (13 total)
  * EventEmitter uses string event names, not discriminated union objects
  */
 type StateEvent =
   | 'CLIENT_SOCKET_CONNECTED'
-  | 'START_AGENT_CONNECT'
   | 'AGENT_GREETING_OK'
   | 'CLIENT_DATA_START'
   | 'CLIENT_DATA_PARTIAL'
@@ -69,7 +67,6 @@ type StateEvent =
  */
 export interface EventPayloads {
     CLIENT_SOCKET_CONNECTED: undefined;
-    START_AGENT_CONNECT: undefined;
     AGENT_GREETING_OK: { greeting: string };
     CLIENT_DATA_START: { data: Buffer };
     CLIENT_DATA_PARTIAL: { data: Buffer };
@@ -99,14 +96,9 @@ type StateTransitionTable = {
  */
 const STATE_TRANSITIONS: StateTransitionTable = {
   DISCONNECTED: {
-    CLIENT_SOCKET_CONNECTED: 'CLIENT_CONNECTED',
+    CLIENT_SOCKET_CONNECTED: 'CONNECTING_TO_AGENT',
   },
-  CLIENT_CONNECTED: {
-    START_AGENT_CONNECT: 'AGENT_CONNECTING',
-    ERROR_OCCURRED: 'ERROR',
-    CLEANUP_REQUESTED: 'CLOSING',
-  },
-  AGENT_CONNECTING: {
+  CONNECTING_TO_AGENT: {
     AGENT_GREETING_OK: 'READY',
     ERROR_OCCURRED: 'ERROR',
     CLEANUP_REQUESTED: 'CLOSING',
@@ -208,7 +200,6 @@ class ClientSessionManager extends EventEmitter {
 
         // Single-fire initialization events
         this.once('CLIENT_SOCKET_CONNECTED', this.handleClientSocketConnected.bind(this));
-        this.once('START_AGENT_CONNECT', this.handleStartAgentConnect.bind(this));
         this.once('AGENT_GREETING_OK', this.handleAgentGreetingOk.bind(this));
 
         // Multi-fire data/command events (multiple writes and data chunks per session)
@@ -259,17 +250,9 @@ class ClientSessionManager extends EventEmitter {
     // Event Handlers - Change state, process data, emit events
     // ========================================================================
 
-    private handleClientSocketConnected(): void {
+    private async handleClientSocketConnected(): Promise<void> {
         this.transition('CLIENT_SOCKET_CONNECTED');
-        log(this.config, `[${this.sessionId ?? 'pending'}] Client socket connected`);
-
-        // Start agent connection sequence
-        this.emit('START_AGENT_CONNECT');
-    }
-
-    private async handleStartAgentConnect(): Promise<void> {
-        this.transition('START_AGENT_CONNECT');
-        log(this.config, `[${this.sessionId ?? 'pending'}] Connecting to GPG Agent Proxy via command...`);
+        log(this.config, `[${this.sessionId ?? 'pending'}] Client socket connected, connecting to GPG Agent Proxy...`);
 
         try {
             // Connect to agent-proxy and get greeting
@@ -577,8 +560,8 @@ class ClientSessionManager extends EventEmitter {
  * 5. Each client connection: connect to agent → process commands → cleanup
  *
  * **State Machine:**
- * - 12 states: DISCONNECTED → CLIENT_CONNECTED → AGENT_CONNECTING → READY → buffering/sending cycle
- * - 14 events: client data, agent responses, writes, errors, cleanup
+ * - 11 states: DISCONNECTED → CONNECTING_TO_AGENT → READY → buffering/sending cycle
+ * - 13 events: client data, agent responses, writes, errors, cleanup
  * - Independent state machines per client (concurrent sessions supported)
  * - INQUIRE D-block buffering: handles GPG's interactive data requests
  * - Error consolidation: all errors → ERROR_OCCURRED → cleanup

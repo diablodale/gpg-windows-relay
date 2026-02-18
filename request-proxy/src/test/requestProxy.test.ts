@@ -31,9 +31,9 @@ describe('RequestProxy', () => {
     });
 
     describe('State Machine Validation', () => {
-        it('should have transition table entries for all 12 states', async () => {
+        it('should have transition table entries for all 11 states', async () => {
             const allStates: string[] = [
-                'DISCONNECTED', 'CLIENT_CONNECTED', 'AGENT_CONNECTING', 'READY',
+                'DISCONNECTED', 'CONNECTING_TO_AGENT', 'READY',
                 'BUFFERING_COMMAND', 'BUFFERING_INQUIRE',
                 'SENDING_TO_AGENT', 'WAITING_FOR_AGENT', 'SENDING_TO_CLIENT',
                 'ERROR', 'CLOSING', 'FATAL'
@@ -46,7 +46,7 @@ describe('RequestProxy', () => {
             );
 
             // If code compiles and reaches here, transition table is properly formed
-            expect(allStates).to.have.length(12);
+            expect(allStates).to.have.length(11);
             await instance.stop();
         });
 
@@ -122,14 +122,14 @@ describe('RequestProxy', () => {
 
             // Check specific transition patterns
             const disconnectedToConnected = logs.filter(log =>
-                log.includes('DISCONNECTED → CLIENT_CONNECTED') && log.includes('(event: CLIENT_SOCKET_CONNECTED)')
+                log.includes('DISCONNECTED → CONNECTING_TO_AGENT') && log.includes('(event: CLIENT_SOCKET_CONNECTED)')
             );
             expect(disconnectedToConnected.length).to.equal(1);
 
-            const connectedToConnecting = logs.filter(log =>
-                log.includes('CLIENT_CONNECTED → AGENT_CONNECTING') && log.includes('(event: START_AGENT_CONNECT)')
+            const connectingToReady = logs.filter(log =>
+                log.includes('CONNECTING_TO_AGENT → READY') && log.includes('(event: AGENT_GREETING_OK)')
             );
-            expect(connectedToConnecting.length).to.equal(1);
+            expect(connectingToReady.length).to.equal(1);
 
             await instance.stop();
         });
@@ -283,9 +283,8 @@ describe('RequestProxy', () => {
 
             // Verify all expected transitions occurred
             const expectedTransitions = [
-                'DISCONNECTED → CLIENT_CONNECTED',
-                'CLIENT_CONNECTED → AGENT_CONNECTING',
-                'AGENT_CONNECTING → READY',
+                'DISCONNECTED → CONNECTING_TO_AGENT',
+                'CONNECTING_TO_AGENT → READY',
                 'READY → BUFFERING_COMMAND',
                 'BUFFERING_COMMAND → SENDING_TO_AGENT',
                 'SENDING_TO_AGENT → WAITING_FOR_AGENT',
@@ -883,7 +882,7 @@ describe('RequestProxy', () => {
     });
 
     describe('Phase 7a: State Transition Verification', () => {
-        it('should transition DISCONNECTED → CLIENT_CONNECTED → AGENT_CONNECTING → READY', async () => {
+        it('should transition DISCONNECTED → CONNECTING_TO_AGENT → READY', async () => {
             mockCommandExecutor.connectAgentResponse = {
                 sessionId: 'test-session-123',
                 greeting: 'OK GPG-Agent ready\n'
@@ -899,11 +898,11 @@ describe('RequestProxy', () => {
             // Initial state is DISCONNECTED (no clients)
             expect(server.getConnections()).to.have.length(0);
 
-            // Simulate client connection → CLIENT_CONNECTED
+            // Simulate client connection → CONNECTING_TO_AGENT
             const clientSocket = server.simulateClientConnection();
             expect(server.getConnections()).to.have.length(1);
 
-            // Socket initialization automatically triggers AGENT_CONNECTING
+            // Async agent connect completes → READY
             await new Promise((resolve) => setTimeout(resolve, 20));
 
             // Verify agent connection was initiated
@@ -988,7 +987,7 @@ describe('RequestProxy', () => {
     });
 
     describe('Phase 7a: Invalid Event Tests', () => {
-        it('should handle socket errors during AGENT_CONNECTING', async () => {
+        it('should handle socket errors during CONNECTING_TO_AGENT', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Network error'));
 
             const instance = await startRequestProxy(
@@ -3658,7 +3657,7 @@ describe('RequestProxy', () => {
         });
 
         it('should transition from multiple socket-having states to CLOSING', async () => {
-            // Test CLEANUP_REQUESTED from CLIENT_CONNECTED state
+            // Test CLEANUP_REQUESTED from CONNECTING_TO_AGENT state
             const instance = await startRequestProxy(
                 { logCallback: mockLogConfig.logCallback },
                 createMockDeps()
@@ -3667,7 +3666,7 @@ describe('RequestProxy', () => {
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
 
-            // Close immediately (CLIENT_CONNECTED state)
+            // Close immediately (CONNECTING_TO_AGENT state)
             await new Promise(resolve => setTimeout(resolve, 10));
             clientSocket.end();
             await new Promise(resolve => setTimeout(resolve, 50));

@@ -6,28 +6,27 @@ VS Code extension that creates a Unix socket server on the remote GPG agent sock
 
 ### State Machine Overview
 
-The request proxy uses an **EventEmitter-based state machine** with 12 states and 14 events to manage GPG protocol forwarding. Each client connection runs an independent state machine, allowing concurrent GPG operations from multiple processes.
+The request proxy uses an **EventEmitter-based state machine** with 11 states and 13 events to manage GPG protocol forwarding. Each client connection runs an independent state machine, allowing concurrent GPG operations from multiple processes.
 
-#### States (12 Total)
+#### States (11 Total)
 
 1. **DISCONNECTED** — No client socket, ready to accept connections
-2. **CLIENT_CONNECTED** — Client socket accepted, paused until agent connection
-3. **AGENT_CONNECTING** — Connecting to agent-proxy, awaiting greeting
-4. **READY** — Agent connected, ready to buffer client commands
-5. **BUFFERING_COMMAND** — Accumulating command bytes from client (until `\n`)
-6. **BUFFERING_INQUIRE** — Accumulating D-block bytes from client (until `END\n`)
-7. **SENDING_TO_AGENT** — Sending command/D-block to agent via VS Code command
-8. **WAITING_FOR_AGENT** — Awaiting complete response from agent
-9. **SENDING_TO_CLIENT** — Sending response to client socket
-10. **ERROR** — Error occurred, cleanup needed
-11. **CLOSING** — Cleanup in progress (socket teardown, agent disconnect, session removal)
-12. **FATAL** — Unrecoverable error (cleanup failed), session destroyed permanently
+2. **CONNECTING_TO_AGENT** — Client socket accepted, connecting to agent-proxy and awaiting greeting
+3. **READY** — Agent connected, ready to buffer client commands
+4. **BUFFERING_COMMAND** — Accumulating command bytes from client (until `\n`)
+5. **BUFFERING_INQUIRE** — Accumulating D-block bytes from client (until `END\n`)
+6. **SENDING_TO_AGENT** — Sending command/D-block to agent via VS Code command
+7. **WAITING_FOR_AGENT** — Awaiting complete response from agent
+8. **SENDING_TO_CLIENT** — Sending response to client socket
+9. **ERROR** — Error occurred, cleanup needed
+10. **CLOSING** — Cleanup in progress (socket teardown, agent disconnect, session removal)
+11. **FATAL** — Unrecoverable error (cleanup failed), session destroyed permanently
 
 Terminal states:
 - **DISCONNECTED** (can accept new connections)
 - **FATAL** (unrecoverable, session removed from Map)
 
-#### Events (14 Total)
+#### Events (13 Total)
 
 **Client Events** (from client GPG process):
 - `CLIENT_SOCKET_CONNECTED` — New client socket accepted
@@ -36,7 +35,6 @@ Terminal states:
 - `CLIENT_DATA_COMPLETE` — Complete command (`\n`) or D-block (`END\n`) received
 
 **Agent Events** (from agent-proxy via VS Code commands):
-- `START_AGENT_CONNECT` — Initiate agent connection
 - `AGENT_GREETING_OK` — Agent greeting received successfully
 - `AGENT_RESPONSE_COMPLETE` — Complete response from agent received
 - `RESPONSE_OK_OR_ERR` — Agent response is OK or ERR (return to READY)
@@ -56,9 +54,7 @@ Terminal states:
 ```
 DISCONNECTED
   ↓ CLIENT_SOCKET_CONNECTED
-CLIENT_CONNECTED
-  ↓ START_AGENT_CONNECT
-AGENT_CONNECTING
+CONNECTING_TO_AGENT
   ↓ AGENT_GREETING_OK
 READY
   ↓ CLIENT_DATA_START
@@ -107,8 +103,7 @@ The socket `'close'` event provides a `hadError` boolean parameter that determin
 
 Socket close can occur in any socket-having state:
 
-- **CLIENT_CONNECTED** — Client disconnects before agent connection completes
-- **AGENT_CONNECTING** — Client disconnects during agent handshake
+- **CONNECTING_TO_AGENT** — Client disconnects before agent connection completes
 - **READY** — Client process crashes, network failure
 - **BUFFERING_COMMAND** — Client disconnects mid-command
 - **BUFFERING_INQUIRE** — Client disconnects mid-D-block
@@ -189,10 +184,10 @@ Each client connection is managed independently:
 4. Listen for client connections
 
 **Per-Client Session:**
-1. Client connects → `CLIENT_SOCKET_CONNECTED`
+1. Client connects → `CLIENT_SOCKET_CONNECTED` → `CONNECTING_TO_AGENT`
 2. Pause socket (prevent data loss during agent connection)
-3. Connect to agent-proxy → `AGENT_GREETING_OK`
-4. Resume socket → `READY`
+3. Connect to agent-proxy → `AGENT_GREETING_OK` → `READY`
+4. Resume socket
 5. Process commands in loop: buffer → send → wait → respond
 6. Client disconnects → cleanup → remove from Map
 
