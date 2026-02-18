@@ -26,7 +26,7 @@ Terminal states:
 - **DISCONNECTED** (can accept new connections)
 - **FATAL** (unrecoverable, session removed from Map)
 
-#### Events (13 Total)
+#### Events (12 Total)
 
 **Client Events** (from client GPG process):
 - `CLIENT_SOCKET_CONNECTED` — New client socket accepted
@@ -40,7 +40,7 @@ Terminal states:
 - `RESPONSE_INQUIRE` — Agent response contains INQUIRE (buffer D-block)
 
 **Write Events**:
-- `WRITE_OK` — Write to agent/client succeeded
+- `AGENT_WRITE_COMPLETE` — Write to agent succeeded (transitions SENDING_TO_AGENT → WAITING_FOR_AGENT)
 
 **Error & Cleanup Events**:
 - `ERROR_OCCURRED` — Any error (buffer, write, socket, protocol violation)
@@ -50,42 +50,34 @@ Terminal states:
 
 #### State Transition Flow
 
-```
-DISCONNECTED
-  ↓ CLIENT_SOCKET_CONNECTED
-CONNECTING_TO_AGENT
-  ↓ AGENT_RESPONSE_COMPLETE (greeting)
-SENDING_TO_CLIENT
-  ↓ WRITE_OK
-READY ←───────────────────────────┐
-  ↓ CLIENT_DATA_START             │
-BUFFERING_COMMAND                 │
-  ↓ CLIENT_DATA_COMPLETE          │
-SENDING_TO_AGENT                  │
-  ↓ WRITE_OK                      │
-WAITING_FOR_AGENT                 │
-  ↓ AGENT_RESPONSE_COMPLETE       │
-SENDING_TO_CLIENT                 │
-  ├─ RESPONSE_OK_OR_ERR ──────────┤
-  └─ WRITE_OK ────────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> DISCONNECTED
+    
+    DISCONNECTED --> CONNECTING_TO_AGENT: CLIENT_SOCKET_CONNECTED
+    CONNECTING_TO_AGENT --> SENDING_TO_CLIENT: AGENT_RESPONSE_COMPLETE<br/>(greeting)
 
-INQUIRE Flow:
-SENDING_TO_CLIENT
-  ↓ RESPONSE_INQUIRE
-BUFFERING_INQUIRE
-  ↓ CLIENT_DATA_COMPLETE (D-block + END\n)
-SENDING_TO_AGENT
-  ↓ WRITE_OK
-WAITING_FOR_AGENT
-  ↓ AGENT_RESPONSE_COMPLETE
-SENDING_TO_CLIENT
-  └─ RESPONSE_OK_OR_ERR → READY
-
-Error from any state:
-  → ERROR_OCCURRED → ERROR → CLEANUP_REQUESTED → CLOSING → DISCONNECTED
-
-Cleanup failure:
-  → CLEANUP_ERROR → FATAL (permanent dead end, session removed from Map)
+    READY --> BUFFERING_COMMAND: CLIENT_DATA_START
+    BUFFERING_COMMAND --> SENDING_TO_AGENT: CLIENT_DATA_COMPLETE
+    SENDING_TO_AGENT --> WAITING_FOR_AGENT: AGENT_WRITE_COMPLETE
+    WAITING_FOR_AGENT --> SENDING_TO_CLIENT: AGENT_RESPONSE_COMPLETE
+    SENDING_TO_CLIENT --> READY: RESPONSE_OK_OR_ERR
+    
+    SENDING_TO_CLIENT --> BUFFERING_INQUIRE: RESPONSE_INQUIRE
+    BUFFERING_INQUIRE --> SENDING_TO_AGENT: CLIENT_DATA_COMPLETE<br/>(D-block + END)
+    
+    state ERROR_HANDLING {
+        [*] --> ERROR: ERROR_OCCURRED<br/>from any state
+        ERROR --> CLOSING: CLEANUP_REQUESTED
+    }
+    
+    CLOSING --> DISCONNECTED: CLEANUP_COMPLETE
+    CLOSING --> FATAL: CLEANUP_ERROR
+    
+    note right of FATAL
+        Terminal state
+        Session removed from Map
+    end note
 ```
 
 ### Socket Close Handling
@@ -192,7 +184,7 @@ Each client connection is managed independently:
 1. Client connects → `CLIENT_SOCKET_CONNECTED` → `CONNECTING_TO_AGENT`
 2. Pause socket (prevent data loss during agent connection)
 3. Connect to agent-proxy, receive greeting → `AGENT_RESPONSE_COMPLETE` → `SENDING_TO_CLIENT`
-4. Write greeting to client socket → `WRITE_OK` → `READY`
+4. Write greeting to client socket, detect response type → `RESPONSE_OK_OR_ERR` → `READY`
 5. Resume socket — client can now send commands
 6. Process commands in loop: buffer → send → wait → respond
 7. Client disconnects → cleanup → remove from Map

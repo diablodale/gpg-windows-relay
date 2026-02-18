@@ -51,7 +51,7 @@ type StateEvent =
   | 'CLIENT_DATA_PARTIAL'
   | 'CLIENT_DATA_COMPLETE'
   | 'ERROR_OCCURRED'
-  | 'WRITE_OK'
+  | 'AGENT_WRITE_COMPLETE'
   | 'AGENT_RESPONSE_COMPLETE'
   | 'RESPONSE_OK_OR_ERR'
   | 'RESPONSE_INQUIRE'
@@ -70,7 +70,7 @@ export interface EventPayloads {
     CLIENT_DATA_PARTIAL: { data: Buffer };
     CLIENT_DATA_COMPLETE: { data: string };
     ERROR_OCCURRED: { error: string };
-    WRITE_OK: undefined;
+    AGENT_WRITE_COMPLETE: undefined;
     AGENT_RESPONSE_COMPLETE: { response: string };
     RESPONSE_OK_OR_ERR: { response: string };
     RESPONSE_INQUIRE: { response: string };
@@ -119,7 +119,7 @@ const STATE_TRANSITIONS: StateTransitionTable = {
     CLEANUP_REQUESTED: 'CLOSING',
   },
   SENDING_TO_AGENT: {
-    WRITE_OK: 'WAITING_FOR_AGENT',
+    AGENT_WRITE_COMPLETE: 'WAITING_FOR_AGENT',
     ERROR_OCCURRED: 'ERROR',
     CLEANUP_REQUESTED: 'CLOSING',
   },
@@ -129,7 +129,6 @@ const STATE_TRANSITIONS: StateTransitionTable = {
     CLEANUP_REQUESTED: 'CLOSING',
   },
   SENDING_TO_CLIENT: {
-    WRITE_OK: 'READY',
     RESPONSE_OK_OR_ERR: 'READY',
     RESPONSE_INQUIRE: 'BUFFERING_INQUIRE',
     ERROR_OCCURRED: 'ERROR',
@@ -203,7 +202,7 @@ class ClientSessionManager extends EventEmitter {
         this.on('CLIENT_DATA_START', this.handleClientDataStart.bind(this));
         this.on('CLIENT_DATA_PARTIAL', this.handleClientDataPartial.bind(this));
         this.on('CLIENT_DATA_COMPLETE', this.handleClientDataComplete.bind(this));
-        this.on('WRITE_OK', this.handleWriteOk.bind(this));
+        this.on('AGENT_WRITE_COMPLETE', this.handleAgentWriteComplete.bind(this));
         this.on('AGENT_RESPONSE_COMPLETE', this.handleAgentResponseComplete.bind(this));
         this.on('RESPONSE_OK_OR_ERR', this.handleResponseOkOrErr.bind(this));
         this.on('RESPONSE_INQUIRE', this.handleResponseInquire.bind(this));
@@ -309,18 +308,10 @@ class ClientSessionManager extends EventEmitter {
         this.sendToAgent(data);
     }
 
-    private handleWriteOk(): void {
-        if (this.getState() === 'SENDING_TO_AGENT') {
-            this.transition('WRITE_OK');
-            log(this.config, `[${this.sessionId}] Write to agent OK, waiting for response`);
-        } else if (this.getState() === 'SENDING_TO_CLIENT') {
-            // Response written to client, return to READY
-            this.transition('WRITE_OK');
-            log(this.config, `[${this.sessionId}] Write to client OK, ready for next command`);
-
-            // Check for pipelined data
-            this.checkPipelinedData();
-        }
+    private handleAgentWriteComplete(): void {
+        // AGENT_WRITE_COMPLETE only used for agent communication path
+        this.transition('AGENT_WRITE_COMPLETE');
+        log(this.config, `[${this.sessionId}] Write to agent complete, waiting for response`);
     }
 
     private handleAgentResponseComplete(response: string): void {
@@ -344,8 +335,11 @@ class ClientSessionManager extends EventEmitter {
     }
 
     private handleResponseOkOrErr(response: string): void {
-        // WRITE_OK handler will transition to READY
-        log(this.config, `[${this.sessionId}] Response OK/ERR processed`);
+        this.transition('RESPONSE_OK_OR_ERR');
+        log(this.config, `[${this.sessionId}] Response OK/ERR processed, returning to READY`);
+
+        // Check for pipelined data
+        this.checkPipelinedData();
     }
 
     private handleResponseInquire(response: string): void {
@@ -469,8 +463,8 @@ class ClientSessionManager extends EventEmitter {
         try {
             const result = await this.config.commandExecutor.sendCommands(this.sessionId!, data);
 
-            // Emit WRITE_OK event (write successful)
-            this.emit('WRITE_OK');
+            // Emit AGENT_WRITE_COMPLETE event (write successful)
+            this.emit('AGENT_WRITE_COMPLETE');
 
             // Emit AGENT_RESPONSE_COMPLETE event with response
             this.emit('AGENT_RESPONSE_COMPLETE', result.response);
@@ -490,7 +484,7 @@ class ClientSessionManager extends EventEmitter {
                 this.emit('ERROR_OCCURRED', `Write to client failed: ${err.message}`);
             } else {
                 log(this.config, `[${this.sessionId}] ${logMessage}`);
-                this.emit('WRITE_OK');
+                // No AGENT_WRITE_COMPLETE emission - response type events drive state transitions
             }
         });
     }
