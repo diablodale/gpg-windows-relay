@@ -538,11 +538,60 @@ class ClientSessionManager extends EventEmitter {
 }
 
 // ============================================================================
-// Helper Functions
+// Public API
 // ============================================================================
 
 /**
- * Start the Request Proxy
+ * Start the Request Proxy server
+ * 
+ * Creates a Unix socket server on the GPG agent socket path and starts forwarding
+ * GPG protocol operations to the agent-proxy extension on the Windows host.
+ * Each client connection runs an independent EventEmitter-based state machine.
+ * 
+ * @param config - Configuration with optional logging callback
+ * @param deps - Optional dependency injection for testing (commandExecutor, serverFactory, fileSystem, getSocketPath)
+ * 
+ * @returns Promise resolving to RequestProxyInstance with stop() method
+ * 
+ * @throws Error if GPG socket path cannot be determined (gpgconf not found)
+ * @throws Error if socket already in use (another proxy running)
+ * @throws Error if permission errors creating/binding socket
+ * 
+ * @example
+ * ```typescript
+ * const instance = await startRequestProxy({
+ *     logCallback: (msg) => console.log(msg)
+ * }, {
+ *     commandExecutor: new VSCodeCommandExecutor()
+ * });
+ * 
+ * // Later: stop the server
+ * await instance.stop();
+ * ```
+ * 
+ * **Flow:**
+ * 1. Detects GPG socket path via `gpgconf --list-dirs agent-socket`
+ * 2. Creates Unix socket server at detected path
+ * 3. Sets socket permissions to 0o666 (world-writable for GPG access)
+ * 4. Starts listening for client connections
+ * 5. Each client connection: connect to agent → process commands → cleanup
+ * 
+ * **State Machine:**
+ * - 12 states: DISCONNECTED → CLIENT_CONNECTED → AGENT_CONNECTING → READY → buffering/sending cycle
+ * - 14 events: client data, agent responses, writes, errors, cleanup
+ * - Independent state machines per client (concurrent sessions supported)
+ * - INQUIRE D-block buffering: handles GPG's interactive data requests
+ * - Error consolidation: all errors → ERROR_OCCURRED → cleanup
+ * 
+ * **Session Management:**
+ * - Sessions stored in Map<net.Socket, ClientSessionManager>
+ * - Each session: isolated state, buffer, agent sessionId
+ * - Cleanup guarantees: socket destroyed, agent disconnected, session removed
+ * - First-error-wins cleanup pattern (continues even if steps fail)
+ * 
+ * **Testing:**
+ * Use dependency injection to mock VS Code commands, socket server, and file system.
+ * Enables testing without VS Code runtime or real sockets/files.
  */
 export async function startRequestProxy(config: RequestProxyConfig, deps?: RequestProxyDeps): Promise<RequestProxyInstance> {
     // Initialize dependencies with defaults
@@ -641,6 +690,28 @@ export async function startRequestProxy(config: RequestProxyConfig, deps?: Reque
             log(config, 'Request proxy listening');
 
             resolve({
+                /**
+                 * Stop the request proxy server
+                 * 
+                 * Stops accepting new connections, disconnects all active sessions,
+                 * destroys all client sockets, closes the server, and removes the socket file.
+                 * 
+                 * @returns Promise that resolves when server is fully stopped
+                 * 
+                 * **Cleanup Flow:**
+                 * 1. Server stops accepting new connections
+                 * 2. All active sessions emit CLEANUP_REQUESTED
+                 * 3. Each session: disconnect agent, destroy socket, remove from Map
+                 * 4. Unix socket server closed
+                 * 5. Socket file deleted (errors ignored)
+                 * 
+                 * **Guarantees:**
+                 * - All client sockets destroyed
+                 * - All agent sessions disconnected
+                 * - Socket listeners removed
+                 * - Socket file removed (best effort)
+                 * - First-error-wins pattern (cleanup continues if steps fail)
+                 */
                 stop: async () => {
                     return new Promise((stopResolve) => {
                         server.close(() => {
