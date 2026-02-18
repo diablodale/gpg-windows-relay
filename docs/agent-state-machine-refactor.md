@@ -2230,20 +2230,115 @@ Extract duplicate code discovered during refactor to shared package:
 
 ---
 
-### Phase 10: Documentation & Migration Cleanup
+### Phase 10: Documentation & Migration Cleanup ✅ **COMPLETE**
 **Files:** Multiple
 
-- [ ] Update `agent-proxy/README.md` with state machine architecture
-- [ ] Document socket 'close' hadError routing behavior
-- [ ] Document BYE command flow (reuses normal command path)
-- [ ] Update `AGENTS.md` if integration points changed
-- [ ] Remove old promise-based code paths from `agentProxy.ts`
-- [ ] Remove unused private methods (if fully migrated to handlers)
-- [ ] Verify extension.ts command handlers still work correctly
-- [ ] Update JSDoc comments for public API methods (connectAgent, sendCommands, disconnectAgent)
-- [ ] Add architecture diagram to docs/ if helpful (optional)
+- [x] Update `agent-proxy/README.md` with state machine architecture
+- [x] Document socket 'close' hadError routing behavior  
+- [x] Document BYE command flow (reuses normal command path)
+- [x] Update `AGENTS.md` if integration points changed ✅ Already documented
+- [x] Remove old promise-based code paths from `agentProxy.ts` ✅ None found - all event-driven
+- [x] Remove unused private methods (if fully migrated to handlers) ✅ All methods in use
+- [x] Verify extension.ts command handlers still work correctly ✅ Verified
+- [x] Update JSDoc comments for public API methods (connectAgent, sendCommands, disconnectAgent)
+- [ ] Add architecture diagram to docs/ if helpful (optional) ⏭️ Deferred - mermaid diagrams in refactor.md sufficient
+
+**Achieved:**
+- Created comprehensive [agent-proxy/README.md](../agent-proxy/README.md) documenting:
+  - State machine architecture (8 states, 10 events, transition flow)
+  - Socket close handling with hadError routing in ALL states
+  - BYE command as normal command (no special case logic)
+  - Public API documentation (connectAgent, sendCommands, disconnectAgent)
+  - Timeout strategy (connection 5s, greeting 5s, NO response timeout for interactive ops)
+  - Concurrent command prevention (protocol violation)
+  - Session management and cleanup guarantees
+  - Testing approach with dependency injection
+  - Error consolidation to single ERROR_OCCURRED event
+- Enhanced JSDoc comments for all three public API methods with comprehensive parameter/return documentation
+- Verified extension.ts command handlers properly delegate to agentProxyService
+- Confirmed no old promise-based code paths remain - all uses event-driven state machine with promise bridges
+- AGENTS.md already documents state machine pattern architecture
+
+**Test Results:** 272 tests passing (85 shared + 63 agent-proxy + 124 request-proxy)
 
 **Deliverable:** ✅ Documentation current, no dead code
+
+---
+
+### Phase 10.1: Documentation & Migration Cleanup (request-proxy)
+
+#### Work items
+
+- [ ] Create/update `request-proxy/README.md` with technical details; same major sections as `agent-proxy/README.md`
+- [ ] Document socket 'close' hadError routing behavior (client socket)
+- [ ] Document INQUIRE D-block buffering flow
+- [ ] Document state-aware client data handling (CLIENT_DATA_START vs CLIENT_DATA_PARTIAL vs CLIENT_INQUIRE_DATA)
+- [ ] Update `AGENTS.md` if integration points changed ✅ Already documented
+- [ ] Remove old promise-based code paths from `requestProxy.ts` ✅ None - all event-driven
+- [ ] Remove unused private methods (if fully migrated to handlers) 
+- [ ] Verify extension.ts command handlers still work correctly
+- [ ] Update JSDoc comments for public API methods (startRequestProxy, stopRequestProxy)
+- [ ] Add architecture diagram to docs/ if helpful (optional) ⏭️ Deferred - mermaid diagrams in refactor.md sufficient
+
+#### Documentation Topics
+
+##### Architecture
+
+**State Machine Architecture:**
+- 12 states (DISCONNECTED, CLIENT_CONNECTED, AGENT_CONNECTING, READY, BUFFERING_COMMAND, SEND_COMMAND, WAITING_FOR_AGENT, BUFFERING_INQUIRE, SEND_INQUIRE_RESPONSE, ERROR, CLOSING, FATAL)
+- 14 events covering client/agent lifecycle
+- State transition flow with mermaid diagram
+- Terminal states (DISCONNECTED, FATAL)
+
+**Socket Close Handling:**
+- Client socket 'close' can fire in ANY socket-having state
+- hadError routing: transmission error → ERROR, graceful → CLEANUP_REQUESTED → CLOSING
+- Defensive handler checks current state and ignores if already in ERROR/CLOSING/FATAL
+
+**INQUIRE D-block Flow:**
+- WAITING_FOR_AGENT detects INQUIRE response (via detectResponseCompletion from shared)
+- Transition to BUFFERING_INQUIRE state
+- Accumulate client D-block data until END\n detected (uses extractInquireBlock from shared)
+- Send complete D-block to agent via sendCommands
+- Return to WAITING_FOR_AGENT for agent's next response
+
+**State-Aware Client Data Handling:**
+- READY state: CLIENT_DATA_START (first data chunk, extract command)
+- BUFFERING_COMMAND: CLIENT_DATA_PARTIAL (accumulate until newline)
+- BUFFERING_INQUIRE: CLIENT_INQUIRE_DATA (accumulate until END\n)
+- Protocol violations: client data in wrong states → ERROR_OCCURRED
+
+##### Public API
+
+- startRequestProxy(config, deps?): Promise<{ stop: () => Promise<void> }>
+- Creates Unix socket server at GPG socket path
+- Accepts multiple simultaneous client connections
+- Each client session runs independent state machine
+- Communicates with agent-proxy via VS Code commands
+
+##### Session Management
+- Sessions stored in Map<net.Socket, RequestProxySession>
+- Lifecycle: CLIENT_CONNECTED → ... → CLOSING → DISCONNECTED (removed from Map)
+- Cleanup guarantees: socket listeners removed, socket destroyed, agent disconnected
+
+##### Testing
+- Dependency injection via RequestProxyDeps interface
+- Mock implementations: MockCommandExecutor, MockServerFactory, MockFileSystem
+- 124 tests covering state transitions, buffering, INQUIRE flows, error handling, cleanup
+
+##### Error Handling
+
+##### Dependencies
+
+- major dependencies
+
+##### Related
+
+- reference docs, links, etc.
+
+#### Deliverable
+
+* ✅ Request-proxy documentation current, architecture documented, no dead code
 
 ---
 

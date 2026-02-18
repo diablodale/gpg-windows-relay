@@ -623,8 +623,23 @@ export class AgentProxy {
     }
 
     /**
-     * Connect to GPG agent and return a sessionId and greeting
-     * Uses event-driven state machine with promise bridge
+     * Connect to GPG agent and return a sessionId and greeting.
+     * 
+     * Creates a new session and connects to the GPG agent via TCP socket with nonce authentication.
+     * The session flows through states: DISCONNECTED → CONNECTING_TO_AGENT → SOCKET_CONNECTED → 
+     * SENDING_TO_AGENT (nonce) → WAITING_FOR_AGENT (greeting) → READY.
+     * 
+     * Uses event-driven state machine with promise bridge pattern:
+     * - Registers listeners for AGENT_DATA_RECEIVED (success) and CLEANUP_REQUESTED (error)
+     * - Emits CLIENT_CONNECT_REQUESTED to initiate connection
+     * - Promise resolves when greeting received, rejects on timeout or error
+     * 
+     * @returns Promise resolving to object with sessionId (UUID) and greeting response
+     * @throws Connection timeout (5s), greeting timeout (5s), socket errors, validation errors
+     * 
+     * @example
+     * const { sessionId, greeting } = await agentProxy.connectAgent();
+     * console.log(`Connected with session ${sessionId}: ${greeting}`);
      */
     public async connectAgent(): Promise<{ sessionId: string; greeting: string }> {
         const sessionId = uuidv4();
@@ -687,8 +702,31 @@ export class AgentProxy {
     }
 
     /**
-     * Send command block to GPG agent and return response
-     * Uses event-driven state machine with promise bridge
+     * Send command block to GPG agent and return response.
+     * 
+     * Sends one or more GPG commands to the agent and waits for complete response.
+     * Session must be in READY state (protocol violation if not). Response accumulates
+     * until OK/ERR/INQUIRE detected via detectResponseCompletion().
+     * 
+     * Uses event-driven state machine with promise bridge pattern:
+     * - Validates session exists and is in READY state
+     * - Registers listeners for AGENT_DATA_RECEIVED (success) and CLEANUP_REQUESTED (error)
+     * - Emits CLIENT_DATA_RECEIVED to initiate command send
+     * - Promise resolves when complete response received, rejects on error or cleanup
+     * 
+     * State flow: READY → SENDING_TO_AGENT → WAITING_FOR_AGENT → READY
+     * 
+     * NO TIMEOUT: Commands can be interactive (password prompts, INQUIRE). Network failures
+     * detected via socket 'close' event, not arbitrary timeouts.
+     * 
+     * @param sessionId - Session ID from connectAgent()
+     * @param commandBlock - GPG command(s) to send (e.g., "BYE\n" or "GETINFO version\n")
+     * @returns Promise resolving to object with response string from agent
+     * @throws Session not found, not in READY state (protocol violation), write errors, socket errors
+     * 
+     * @example
+     * const { response } = await agentProxy.sendCommands(sessionId, 'GETINFO version\n');
+     * console.log(`Agent version: ${response}`);
      */
     public async sendCommands(sessionId: string, commandBlock: string): Promise<{ response: string }> {
         const session = this.sessions.get(sessionId);
@@ -732,9 +770,33 @@ export class AgentProxy {
     }
 
     /**
-     * Gracefully disconnect a session by sending BYE command
-     * Uses event-driven state machine with promise bridge
-     * Waits for CLEANUP_REQUESTED (socket close) rather than just BYE response
+     * Gracefully disconnect a session by sending BYE command.
+     * 
+     * Sends BYE command via normal command flow, then waits for socket to close.
+     * BYE is NOT a special case - reuses SENDING_TO_AGENT → WAITING_FOR_AGENT → READY flow.
+     * GPG agent closes socket after BYE OK response per protocol spec.
+     * Socket 'close' event (hadError=false) triggers CLEANUP_REQUESTED → CLOSING → cleanup.
+     * 
+     * Uses event-driven state machine with promise bridge pattern:
+     * - Validates session exists
+     * - Registers listener for CLEANUP_REQUESTED (covers both graceful and error paths)
+     * - If READY: emits CLIENT_DATA_RECEIVED with 'BYE\n'
+     * - If not READY: emits ERROR_OCCURRED to force cleanup
+     * - Promise always resolves (never rejects) after cleanup complete
+     * 
+     * Cleanup guarantees:
+     * - Socket listeners removed via removeAllListeners()
+     * - Socket destroyed via socket.destroy()
+     * - Session deleted from Map
+     * - First-error-wins pattern (cleanup continues even if one step fails)
+     * 
+     * @param sessionId - Session ID from connectAgent()
+     * @returns Promise resolving when session cleaned up and removed from Map
+     * @throws Session not found
+     * 
+     * @example
+     * await agentProxy.disconnectAgent(sessionId);
+     * console.log('Disconnected from agent');
      */
     public async disconnectAgent(sessionId: string): Promise<void> {
         const session = this.sessions.get(sessionId);
