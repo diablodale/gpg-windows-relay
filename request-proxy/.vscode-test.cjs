@@ -10,5 +10,7 @@ module.exports = defineConfig({
     launchArgs: [
         // Prevent other extensions from activating during tests.
         '--disable-extensions'
-    ]
+    ],
+    // Skip extension dependencies install of agent-proxy during request-proxy unit tests.
+    skipExtensionDependencies: true
 });

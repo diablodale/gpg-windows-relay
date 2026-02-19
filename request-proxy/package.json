@@ -3,10 +3,16 @@
   "displayName": "GPG Request Proxy",
   "description": "Remote request proxy component for GPG relay",
   "version": "0.0.1",
+  "preview": true,
   "publisher": "local",
+  "license": "See LICENSE file",
   "repository": {
     "type": "git",
     "url": "https://github.com/diablodale/gpg-windows-relay"
+  },
+  "qna": false,
+  "bugs": {
+    "url": "https://github.com/diablodale/gpg-windows-relay/issues"
   },
   "engines": {
     "vscode": "^1.108.1",
@@ -15,8 +21,17 @@
   "extensionKind": [
     "workspace"
   ],
+  "extensionDependencies": [
+    "local.gpg-agent-proxy"
+  ],
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "gpg",
+    "gnupg",
+    "proxy",
+    "assuan"
   ],
   "activationEvents": [
     "onStartupFinished"
