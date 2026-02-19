@@ -283,6 +283,7 @@ async function stopAgentProxy(): Promise<void> {
 	}
 
 	outputChannel.appendLine('Stopping agent proxy...');
+	agentProxyService.dispose();
 	agentProxyService = null;
 	// Reset detected state so the next start re-detects (e.g. if Gpg4win path changed).
 	detectedGpg4winPath = null;

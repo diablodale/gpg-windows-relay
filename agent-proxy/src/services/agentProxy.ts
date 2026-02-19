@@ -850,4 +850,33 @@ export class AgentProxy {
     public getSessionCount(): number {
         return this.sessions.size;
     }
+
+    /**
+     * Dispose all active sessions by destroying their sockets.
+     *
+     * Called by stopAgentProxy() before the AgentProxy instance is dropped.
+     * Without this, open TCP sockets to gpg-agent would leak until GC.
+     *
+     * Each session is force-destroyed (not gracefully disconnected) because
+     * we cannot await individual BYE handshakes during a synchronous stop.
+     * The socket destroy() triggers the 'close' event on each session, which
+     * drives the state machine through CLEANUP_REQUESTED → CLOSING → CLEANUP_COMPLETE
+     * and removes the session from the Map via the CLEANUP_COMPLETE listener.
+     */
+    public dispose(): void {
+        if (this.sessions.size === 0) {
+            return;
+        }
+        log(this.config, `[AgentProxy] Disposing ${this.sessions.size} active session(s)`);
+        const disposeError = new Error('AgentProxy disposed');
+        for (const [sessionId, session] of this.sessions) {
+            const state = session.getState();
+            // Only trigger cleanup for sessions that have open sockets.
+            // Sessions already in ERROR, CLOSING, or FATAL are already being cleaned up.
+            if (state !== 'DISCONNECTED' && state !== 'ERROR' && state !== 'CLOSING' && state !== 'FATAL') {
+                log(this.config, `[${sessionId}] Force-closing session during dispose (state: ${state})`);
+                session.emit('ERROR_OCCURRED', { error: disposeError });
+            }
+        }
+    }
 }
