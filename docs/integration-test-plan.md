@@ -437,18 +437,11 @@ and the test agent's socket is live.
 
 ## Phase 2 — `request-proxy` → `agent-proxy` → Real gpg-agent
 
-**Constraint:** `request-proxy` is a remote-only extension (WSL/container/SSH). Phase 2 runs inside
-a **dedicated dev container** (Ubuntu 22.04, no `gpg` installed, no `GNUPGHOME`). The tests call
-VS Code commands (`_gpg-agent-proxy.*`) directly — no `gpg` CLI is invoked from the container.
-
-Phase 2 involves **two extension hosts running simultaneously**:
-- **Windows local extension host** — runs `agent-proxy`; needs the same isolated gpg-agent setup
-  as Phase 1 (unique `GNUPGHOME`, `gpg-agent.conf`, `cli.launchAgent()`). The exact mechanism
-  for triggering this Windows-side setup from a container context is deferred until after
-  Phase 1 is implemented and the pattern is understood.
-- **Container remote extension host** — runs `request-proxy`; no `gpg`, no `GNUPGHOME`.
-
-`agent-proxy` runs on the **Windows host only**; the container has no gpg keyring.
+**Constraint:** `request-proxy` is a remote-only extension (dev container/WSL/SSH). Phase 2 exercises
+the full proxy chain: client Unix socket → `request-proxy` (Linux) → VS Code command routing
+→ `agent-proxy` (Windows) → gpg-agent (Windows). No `gpg` CLI is needed on the Linux side;
+tests use `AssuanSocketClient` to speak directly to the Unix domain socket that `request-proxy`
+creates.
 
 **Location:** `request-proxy/test/integration/requestProxyIntegration.test.ts`
 
@@ -457,42 +450,99 @@ Phase 2 involves **two extension hosts running simultaneously**:
 "test:integration": "tsc --build tsconfig.test.json && node out/test/integration/runTest.js"
 ```
 
-### Dev Container Setup
+### Proposed Automated Runner Approach *(validate after Phase 1)*
 
-Create `.devcontainer/phase2/devcontainer.json`:
+The goal is a fully automated `npm run test:integration` — no manual "Reopen in Container" click.
+The key insight: `@vscode/test-electron`'s `runTests()` accepts arbitrary `launchArgs` passed
+directly to the VS Code executable
+([vscode-test docs](https://github.com/Microsoft/vscode-test#readme),
+[vscode-test-cli docs](https://github.com/microsoft/vscode-test-cli/blob/main/README.md),
+[defineConfig schema](https://github.com/microsoft/vscode-test-cli/blob/main/src/config.cts)).
+Combining `--remote` with `extensionDevelopmentPath` for both extensions should cause VS Code to:
 
-```json
-{
-  "name": "gpg-windows-relay phase 2 integration tests",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
-  "postCreateCommand": "code --install-extension ${containerWorkspaceFolder}/pack/request-proxy.vsix"
-}
+1. Connect to a dev container (preferred) or WSL remote
+   - **Dev container is preferred** over WSL: `devcontainer.json` declaratively defines all
+     dependencies (`gnupg2`, extensions, env vars, image), giving a reproducible isolated
+     environment. WSL is a personal machine setup that varies between developers.
+2. Route each extension to the correct host based on its `extensionKind`:
+   - `agent-proxy` (`extensionKind: ["ui"]`) → Windows local extension host
+   - `request-proxy` (`extensionKind: ["workspace"]`) → remote extension host (Linux)
+3. Run `extensionTestsPath` (Mocha suite) in the remote host — where the Unix socket exists
+
+**Proposed `runTest.ts` additions over Phase 1:**
+```typescript
+await runTests({
+    extensionDevelopmentPath: [
+        path.resolve(__dirname, '../../..'),               // agent-proxy → local (ui)
+        path.resolve(__dirname, '../../../../request-proxy') // request-proxy → remote (workspace)
+    ],
+    launchArgs: [
+        '--install-extension', 'ms-vscode-remote.remote-containers', // needed in bare test VS Code
+        '--remote', 'dev-container+<uri>',  // uri TBD after experimentation
+        '/workspaces/gpg-windows-relay'
+        // WSL fallback: '--install-extension', 'ms-vscode-remote.remote-wsl',
+        //               '--remote', 'wsl+Ubuntu-22.04', '/mnt/c/njs/gpg-windows-relay'
+    ],
+    extensionTestsEnv: {
+        VSCODE_INTEGRATION_TEST: '1',
+        GNUPGHOME,
+        TEST_KEY_FINGERPRINT: fingerprint
+    }
+});
 ```
 
-- `request-proxy.vsix` must be built via `npm run package` before opening the container
-- No `gpg` installed — Phase 2 tests call VS Code commands directly, not `gpg` CLI
-- No `GNUPGHOME` — container has no gpg keyring; all keys live on Windows
-- `agent-proxy` is installed on the **Windows local extension host** automatically by VS Code
-  Remote (it has `extensionKind: ["ui"]`); do not install it in the container
+The `installExtensions` field in `defineConfig`'s schema also accepts local `.vsix` paths and
+marketplace IDs — it is not limited to one or the other. However, `defineConfig` is not used
+here because it has no pre-launch lifecycle hook; `cli.launchAgent()` must run before
+`activate()` fires (same reason as Phase 1).
+
+**Unknowns to validate experimentally after Phase 1:**
+
+1. **`extensionTestsEnv` propagation**: Does it inject into the Windows local host (where
+   `agent-proxy` needs `GNUPGHOME`), the remote host, or both? This is the critical unknown.
+   If it only reaches the remote host, `agent-proxy` cannot see the isolated `GNUPGHOME` and
+   will use the real Windows keyring instead.
+2. **`extensionDevelopmentPath` routing**: Does VS Code correctly route each path to the
+   appropriate host based on `extensionKind` when `--remote` is active?
+3. **`extensionTestsPath` location**: Does the Mocha suite run in the remote (Linux) host where
+   the Unix domain socket exists? It must for `AssuanSocketClient` to connect.
+4. **`--install-extension` + `--remote` ordering**: Does installing `remote-containers` in the
+   same `launchArgs` invocation as `--remote dev-container+<uri>` work, or does it require a
+   separate pre-install step? Does the container URI format require the container to already be
+   running?
 
 ### Setup / Teardown
 
 ```
-[Windows local extension host — setup deferred until after Phase 1]
-  Needs same isolated gpg-agent + test key setup as Phase 1.
-  Exact mechanism (runTest.ts coordination, workspace config, or other) TBD.
+[runTest.ts — Windows, before extension hosts launch]
+  GNUPGHOME = fs.mkdtempSync(path.join(os.tmpdir(), 'gpg-test-'))
+  process.env.GNUPGHOME = GNUPGHOME
+  cli = new GpgCli()
+  cli.writeAgentConf([...])     ← same 4 options as Phase 1
+  cli.generateKey('Test User', 'test@example.com')
+  fingerprint = cli.getFingerprint('test@example.com')
+  cli.launchAgent()
+  try:
+    runTests({ launchArgs: ['--remote', 'dev-container+<uri>', '/workspaces/gpg-windows-relay'],               extensionDevelopmentPath: [agent-proxy, request-proxy],
+               extensionTestsEnv: { VSCODE_INTEGRATION_TEST: '1', GNUPGHOME,
+                                    TEST_KEY_FINGERPRINT: fingerprint } })
+  finally:
+    cli.killAgent()
+    cli.deleteKey(fingerprint)
+    rmSync(GNUPGHOME)
 
-[Container — before()]
+[Mocha before() — remote (Linux) extension host]
+  - fingerprint = process.env.TEST_KEY_FINGERPRINT  ← injected via extensionTestsEnv
   - instance = await startRequestProxy(config, {
-        commandExecutor: new VSCodeCommandExecutor(),   // real agent-proxy VS Code commands
+        commandExecutor: new VSCodeCommandExecutor(),
         getSocketPath: async () => '/tmp/gpg-relay-test.sock'
     })
-  - fingerprint = obtained from Windows side (mechanism TBD after Phase 1)
 
-[Container — after()]
+[Mocha after()]
   - await instance.stop()
-  - Windows-side teardown (key delete, agent kill) — mechanism TBD
 ```
+
+*All of the above is contingent on the unknowns being resolved after Phase 1.*
 
 ### Test Cases
 
@@ -540,50 +590,99 @@ Create `.devcontainer/phase2/devcontainer.json`:
 
 ## Phase 3 — `gpg.exe` → `request-proxy` → `agent-proxy` → gpg-agent
 
-**Constraint:** `request-proxy` must run in a remote environment. Phase 3 runs inside a **dev
-container** where `request-proxy` extension is active remotely and `agent-proxy` is active on the
-Windows host.
+**Constraint:** Phase 3 exercises the full end-to-end chain with a real `gpg` binary on Linux
+calling through the relay to the Windows gpg-agent. `gnupg2` must be installed in the remote;
+`GNUPGHOME` must be set in the remote and must contain the public key of the Windows test key
+so `gpg` can address it by fingerprint. Private keys never leave Windows.
 
 **Location:** `request-proxy/test/integration/gpgCliIntegration.test.ts`
 
-### Dev Container Setup
+### Proposed Automated Runner Approach *(builds on Phase 2 findings)*
 
-Create `.devcontainer/phase3/devcontainer.json`:
+Same `runTests()` + `--remote` approach as Phase 2, with two additions:
 
+1. **`gnupg2` on the remote**: either baked into a custom container image, or installed via
+   `postCreateCommand` before the test VS Code connects.
+
+2. **Linux-side `GNUPGHOME` and public key**: the Windows `runTest.ts` generates a throwaway
+   key, exports the public key, and needs to write it into the container's filesystem before
+   the Mocha suite starts. Path: the container mounts the Windows workspace at
+   `/workspaces/gpg-windows-relay` (or `/mnt/c/...` in WSL), so the key export can be written
+   to a well-known path the container can read. Then Mocha `before()` imports it into
+   `GNUPGHOME` using `cli.importPublicKey()`.
+
+**Proposed `runTest.ts` additions over Phase 2:**
+```typescript
+// Windows side — before runTests()
+// Container image has gnupg2 pre-installed; defined in devcontainer.json
+const CONTAINER_WORKSPACE = '/workspaces/gpg-windows-relay';
+const LINUX_GNUPGHOME = '/tmp/gpg-test-integration'; // defined in devcontainer.json remoteEnv
+const exportPath = path.join(GNUPGHOME, 'pubkey-export.asc');
+fs.writeFileSync(exportPath, cli.exportPublicKey(fingerprint), 'latin1');
+// exportPath is accessible from container via /workspaces mount
+
+await runTests({
+    launchArgs: [
+        '--install-extension', 'ms-vscode-remote.remote-containers',
+        '--remote', 'dev-container+<uri>',
+        CONTAINER_WORKSPACE
+    ],
+    extensionTestsEnv: {
+        VSCODE_INTEGRATION_TEST: '1',
+        GNUPGHOME: LINUX_GNUPGHOME,    // Linux-side GNUPGHOME for gpg CLI + request-proxy
+        WINDOWS_GNUPGHOME: GNUPGHOME,  // Windows-side GNUPGHOME for agent-proxy
+        TEST_KEY_FINGERPRINT: fingerprint,
+        PUBKEY_EXPORT_PATH: `${CONTAINER_WORKSPACE}/...` // container-visible path to pubkey
+    }
+});
+```
+
+**`devcontainer.json` for Phase 3:**
 ```json
 {
   "name": "gpg-windows-relay phase 3 integration tests",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y gnupg2 && code --install-extension ${containerWorkspaceFolder}/pack/request-proxy.vsix",
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y gnupg2",
   "remoteEnv": {
-    "GNUPGHOME": "/tmp/gpg-test"
+    "GNUPGHOME": "/tmp/gpg-test-integration"
   }
 }
 ```
+All test dependencies are declared in `devcontainer.json` — reproducible and isolated from any
+developer machine state.
 
-Additional container configuration:
-- `request-proxy.vsix` must be built via `npm run package` before opening the container
-- `GNUPGHOME=/tmp/gpg-test` (isolated from any host keyring; no Linux gpg-agent runs — the
-  container's `gpg` uses the Unix socket provided by `request-proxy` as its agent socket)
-- `agent-proxy` is installed on the **Windows local extension host** automatically by VS Code
-  Remote (it has `extensionKind: ["ui"]`); do not install it in the container
-- Test key setup: generate a no-passphrase key on **Windows** (private + public key in Windows gpg-agent
-  GNUPGHOME); export only the **public key** from Windows and import it into the container's `GNUPGHOME`.
-  The container must never hold private keys — it only holds public keys to address key operations by fingerprint.
+**Open question from Phase 2 carries over:** if `extensionTestsEnv` only reaches the remote
+host, then `WINDOWS_GNUPGHOME` never reaches `agent-proxy`. Phase 3 design depends on resolving
+the Phase 2 unknowns first.
 
 ### Setup / Teardown
 
 ```
-before()
-  - Ensure GNUPGHOME exists and has correct permissions
-  - Generate throwaway no-passphrase test key on **Windows** (private + public key in Windows gpg-agent GNUPGHOME)
-  - Export only the **public key** from Windows; import it into the container's GNUPGHOME
-  - Wait for request-proxy + agent-proxy to be active (poll isRunning())
+[runTest.ts — Windows, before extension hosts launch]
+  GNUPGHOME = fs.mkdtempSync(...)   ← Windows-side isolated keyring
+  process.env.GNUPGHOME = GNUPGHOME
+  cli = new GpgCli()
+  cli.writeAgentConf([...])
+  cli.generateKey('Test User', 'test@example.com')
+  fingerprint = cli.getFingerprint('test@example.com')
+  cli.launchAgent()
+  write cli.exportPublicKey(fingerprint) to well-known path accessible from container
+  runTests({ ..., extensionTestsEnv: { GNUPGHOME: '/tmp/gpg-test-integration',
+                                       WINDOWS_GNUPGHOME: GNUPGHOME,
+                                       TEST_KEY_FINGERPRINT: fingerprint,
+                                       PUBKEY_EXPORT_PATH: '<container-visible-path>' } })
+  finally: cli.killAgent(); cli.deleteKey(fingerprint); rmSync(GNUPGHOME)
+
+[Mocha before() — remote (Linux) extension host]
+  - fs.mkdirSync(process.env.GNUPGHOME, { recursive: true, mode: 0o700 })
+  - linuxCli = new GpgCli()   ← uses GNUPGHOME from env (Linux path)
+  - linuxCli.importPublicKey(fs.readFileSync(process.env.PUBKEY_EXPORT_PATH, 'latin1'))
+  - fingerprint = process.env.TEST_KEY_FINGERPRINT
   - Prepare test payload: Buffer.from('integration test payload')
 
-after()
-  - Delete test key from Windows gpg-agent GNUPGHOME
-  - Delete public key from container GNUPGHOME
+[Mocha after()]
+  - linuxCli.deleteKey(fingerprint)   ← remove public key from Linux GNUPGHOME
+  - rmSync(process.env.GNUPGHOME, { recursive: true, force: true })
 ```
 
 ### Test Cases
@@ -632,28 +731,22 @@ npm run test:integration
 # generates test key, starts extension host with GNUPGHOME set, runs tests, cleans up
 ```
 
-### Phase 2 (inside `.devcontainer/phase2`)
+### Phase 2 *(approach TBD — validate after Phase 1)*
 ```powershell
-# 1. Build and package both extensions (on Windows, before opening container)
-npm run package
-```
-1. Reopen workspace in VS Code using **Dev Containers: Reopen in Container** → select `phase2`
-2. `postCreateCommand` installs `request-proxy.vsix`; `agent-proxy` loads in the Windows local extension host automatically
-3. Open a terminal inside the container:
-```bash
+# 1. Build both extensions
+npm run compile
+# 2. Run integration tests (runTest.ts fires VS Code with --remote dev-container+<uri>)
 cd request-proxy
 npm run test:integration
 ```
+If the automated `--remote dev-container+<uri>` approach proves unworkable, WSL is the next
+fallback (`--remote wsl+Ubuntu-22.04`), then manual "Reopen in Container" as last resort.
 
-### Phase 3 (inside `.devcontainer/phase3`)
+### Phase 3 *(approach TBD — depends on Phase 2 findings)*
 ```powershell
-# 1. Build and package both extensions (on Windows, before opening container)
-npm run package
-```
-1. Reopen workspace in VS Code using **Dev Containers: Reopen in Container** → select `phase3`
-2. `postCreateCommand` installs `gnupg2` and `request-proxy.vsix`; `agent-proxy` loads in the Windows local extension host automatically
-3. Open a terminal inside the container:
-```bash
+# 1. Build both extensions
+npm run compile
+# 2. Run integration tests
 cd request-proxy
 npm run test:integration:phase3
 ```
@@ -671,11 +764,11 @@ npm run test:integration:phase3
 | `GNUPGHOME` is a unique temp dir per run (`fs.mkdtempSync`) | `runTest.ts` is full Node.js; the path is computed before `runTests()` is called and passed to both `GpgCli` and `extensionTestsEnv`, so uniqueness is trivial |
 | Isolated gpg-agent launched in `runTest.ts` (outside extension host) | Agent must exist before `activate()` runs, since `detectAgentSocket()` calls `gpgconf` at activation time; Mocha `before()` runs too late |
 | `GpgCli` shared via `@gpg-relay/shared/test/integration` | All gpg/gpgconf calls needed by all phases; avoids duplication and scattered spawnSync |
-| Phase 2 runs in dev container only | `request-proxy` is a remote-only extension; running it on Windows directly would violate its design constraint |
-| Phases 2 and 3 each have two extension hosts | VS Code Remote architecture: `agent-proxy` (`extensionKind: ["ui"]`) runs in the Windows local host; `request-proxy` (`extensionKind: ["workspace"]`) runs in the container remote host; Windows-side isolated agent setup for Phase 2 is deferred until after Phase 1 |
-| Phase 3 uses dev container (Ubuntu 22.04 LTS) | `request-proxy` is designed for remote environments; container provides clean isolated environment |
-| Phase 3 test key: private on Windows, only public in container | Container `GNUPGHOME` must hold the public key so `gpg` can address it by fingerprint; private key stays on Windows so signing flows through agent-proxy to the real gpg-agent |
-| Extensions packaged to `.vsix` before integration tests | Tests use real packaged extensions, not raw source; catches packaging issues early; devcontainers install from pre-built `.vsix` via `postCreateCommand` |
+| Phase 2/3 use `runTests()` + `launchArgs: ['--remote', 'dev-container+<uri>', ...]` | VS Code `extensionKind` routing loads `agent-proxy` locally and `request-proxy` remotely from a single test invocation; `runTest.ts` keeps the pre-launch gpg-agent lifecycle hook that `defineConfig` lacks; dev container is preferred over WSL because `devcontainer.json` declaratively defines all dependencies (image, `gnupg2`, env vars) making it reproducible and isolated from personal machine state. Refs: [vscode-test](https://github.com/Microsoft/vscode-test#readme), [vscode-test-cli](https://github.com/microsoft/vscode-test-cli/blob/main/README.md), [defineConfig schema](https://github.com/microsoft/vscode-test-cli/blob/main/src/config.cts) |
+| `installExtensions` / `--install-extension` accepts both marketplace IDs and `.vsix` paths | No need for `fromMachine: true`; the bare downloaded test VS Code can have `ms-vscode-remote.remote-containers` (or `remote-wsl` as fallback) added via `launchArgs`, keeping the environment isolated from the developer's real VS Code install |
+| Phase 2/3 `extensionTestsEnv` propagation is an open unknown | If env vars only reach the remote host, `agent-proxy` (Windows local host) won't see `GNUPGHOME`; fallback options include a VS Code workspace setting override or a dedicated agent-proxy command that accepts a GNUPGHOME path — to be resolved experimentally after Phase 1 |
+| Phase 3 test key: private on Windows, only public exported to Linux | Linux `gpg` only needs the public key to address key operations by fingerprint; private key stays on Windows so all signing flows through `agent-proxy` to the real gpg-agent; public key is exported to a path accessible from the container |
+| Phase 2/3 fallback: manual "Reopen in Container" | If automated `--remote` in `launchArgs` proves unworkable, the fallback runs tests from a terminal inside the container after manually connecting VS Code Remote; Windows-side isolation remains unsolved in that path |
 | `GpgCli` consolidates all `gpg`/`gpgconf` subprocess calls | Single place for binary path resolution, `GNUPGHOME` env injection, temp file creation, and error handling; no scattered `spawnSync` calls across test files |
 | `GpgCli` reads `GNUPGHOME` from `process.env`; `runTest.ts` sets it before first use | Eliminates ambiguous constructor param; `process.env.GNUPGHOME = GNUPGHOME` in `runTest.ts` is idiomatic for a runner script; same `new GpgCli()` call works in runner, extension host, and container |
 | `gpgTestEnvironment.ts` eliminated; logic inlined into `runTest.ts` | After `GpgCli` absorbed all subprocess and conf-file logic the remaining wrapper was two lines; inlining it allows a single `GpgCli` instance to be shared across `writeAgentConf`, `launchAgent`, and `killAgent` within the same try/finally |
