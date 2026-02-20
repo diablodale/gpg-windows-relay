@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import { AgentProxy } from './services/agentProxy';
-import { isTestEnvironment, isIntegrationTestEnvironment } from '@gpg-relay/shared';
+import { isTestEnvironment, isIntegrationTestEnvironment, extractErrorMessage } from '@gpg-relay/shared';
 
 // Global agent proxy service instance
 let agentProxyService: AgentProxy | null = null;
@@ -29,7 +29,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		// UI commands visible to user
 		vscode.commands.registerCommand('gpg-agent-proxy.start', startAgentProxy),
 		vscode.commands.registerCommand('gpg-agent-proxy.stop', stopAgentProxy),
-		vscode.commands.registerCommand('gpg-agent-proxy.restart', restartAgentProxy),
 		vscode.commands.registerCommand('gpg-agent-proxy.showStatus', showStatus),
 		outputChannel,
 		statusBarItem
@@ -56,13 +55,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			// It will update status bar to Ready after successful probe
 			probeGpgAgent();
 		} catch (error: unknown) {
-			outputChannel.appendLine(`Start failed: ${error instanceof Error ? error.message : String(error)}`);
+			outputChannel.appendLine(`Start failed: ${extractErrorMessage(error)}`);
 		}
 	}
 }
 
 export function deactivate() {
-	// TODO: implement disconnect from GPG Agent Proxy and destroy local socket; likely simillar/same as stopAgentProxy()
+	return agentProxyService?.stop();
 }
 
 // TODO Issue Reporting as defined at https://code.visualstudio.com/api/get-started/wrapping-up#issue-reporting
@@ -88,7 +87,7 @@ async function connectAgent(sessionId?: string): Promise<{ sessionId: string; gr
 		outputChannel.appendLine(`[connectAgent] Returning: ${JSON.stringify(result)}`);
 		return result;
 	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
+		const msg = extractErrorMessage(error);
 		outputChannel.appendLine(`[connectAgent] Error: ${msg}`);
 		throw error;
 	}
@@ -111,7 +110,7 @@ async function sendCommands(sessionId: string, commandBlock: string): Promise<{ 
 		outputChannel.appendLine(`[sendCommands] Session ${sessionId}: sent and received response`);
 		return result;
 	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
+		const msg = extractErrorMessage(error);
 		outputChannel.appendLine(`[sendCommands] Session ${sessionId}: Error: ${msg}`);
 		throw error;
 	}
@@ -132,7 +131,7 @@ async function disconnectAgent(sessionId: string): Promise<void> {
 		await agentProxyService.disconnectAgent(sessionId);
 		outputChannel.appendLine(`[disconnectAgent] Session closed: ${sessionId}`);
 	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
+		const msg = extractErrorMessage(error);
 		outputChannel.appendLine(`[disconnectAgent] Session ${sessionId}: Error: ${msg}`);
 		throw error;
 	}
@@ -264,7 +263,7 @@ async function startAgentProxy(): Promise<void> {
 
 		outputChannel.appendLine('Agent proxy initialized. Probe of gpg-agent in process. Status will be READY when complete.');
 	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorMessage = extractErrorMessage(error);
 		outputChannel.appendLine(`Error starting agent proxy: ${errorMessage}`);
 		outputChannel.show(true);
 		vscode.window.showErrorMessage(`Failed to start agent proxy: ${errorMessage}`);
@@ -293,20 +292,6 @@ async function stopAgentProxy(): Promise<void> {
 	updateStatusBar();
 	outputChannel.appendLine('Agent proxy stopped');
 	vscode.window.showInformationMessage('Agent proxy stopped');
-}
-
-/**
- * Restart the agent proxy service
- */
-async function restartAgentProxy(): Promise<void> {
-	await stopAgentProxy();
-	await new Promise((resolve) => setTimeout(resolve, 500));
-	try {
-		await startAgentProxy();
-	} catch (error) {
-		// startAgentProxy already logged and showed the error; just re-throw
-		throw error;
-	}
 }
 
 /**
@@ -378,7 +363,7 @@ async function probeGpgAgent(): Promise<void> {
 		probeSuccessful = true;
 		updateStatusBar();
 	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
+		const msg = extractErrorMessage(error);
 		outputChannel.appendLine(`Probe of gpg-agent failed. Agent proxy is NOT READY: ${msg}`);
 	}
 }

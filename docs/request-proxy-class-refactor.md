@@ -274,11 +274,11 @@ changes yet.
   `await agentProxyService.stop()` call site in `stopAgentProxy()` — add `await` now so
   Phase 6's async upgrade requires no further call-site change (`await` on a sync `void`
   return is a harmless no-op)
-- [ ] **1.6** `agent-proxy/src/extension.ts`: implement `deactivate()` — currently a TODO
+- [x] **1.6** `agent-proxy/src/extension.ts`: implement `deactivate()` — currently a TODO
   stub; use bare `return agentProxyService?.stop()` so VS Code can await the Promise during
   shutdown (see Key Design Decision above); do not use `.catch()` — `outputChannel` may
   already be disposed and VS Code handles deactivate rejections internally
-- [ ] **1.7** `agent-proxy/src/extension.ts`: replace all inline
+- [x] **1.7** `agent-proxy/src/extension.ts`: replace all inline
   `error instanceof Error ? error.message : String(error)` patterns with
   `extractErrorMessage(error)` from `@gpg-relay/shared` (used correctly in request-proxy
   but never imported in agent-proxy)
@@ -287,7 +287,7 @@ changes yet.
   hint as the first arg to `_gpg-agent-proxy.connectAgent`
 - [x] **1.9** `shared/src/test/helpers.ts`: update `MockCommandExecutor.connectAgent(sessionId?: string)`
   to accept optional hint and record it in `calls` for test assertions
-- [ ] **1.10** `agent-proxy/src/extension.ts`: remove `gpg-agent-proxy.restart` command
+- [x] **1.10** `agent-proxy/src/extension.ts`: remove `gpg-agent-proxy.restart` command
   registration and the `restartAgentProxy()` function — `request-proxy` has no restart
   command and symmetry is the goal; a restart is just `stop()` + `start()` that callers
   can do explicitly if needed
@@ -295,8 +295,8 @@ changes yet.
   `npm run test:integration`), verify clean
 - [x] **1.12** Commit items 1.1, 1.2, 1.4, 1.8, 1.9: `feat(agent-proxy): accept optional sessionId hint in connectAgent`
 - [x] **1.13** Commit items 1.3, 1.5: `refactor(agent-proxy): rename dispose() to stop()`
-- [ ] **1.14** Commit items 1.6, 1.7, 1.10: `refactor(agent-proxy): implement deactivate, use extractErrorMessage, remove restart`
-- [ ] **1.15** ✅ Phase gate: all tests green, all commits done — proceed to Phase 2
+- [x] **1.14** Commit items 1.6, 1.7, 1.10: `refactor(agent-proxy): implement deactivate, use extractErrorMessage, remove restart`
+- [x] **1.15** ✅ Phase gate: all tests green, all commits done — proceed to Phase 2
 
 ---
 
@@ -468,7 +468,7 @@ session has fully cleaned up and been removed from the Map.
 
 | Phase | Description | Status |
 |---|---|---|
-| 1 | `shared` + `agent-proxy`: optional `sessionId` hint | 🔄 In progress |
+| 1 | `shared` + `agent-proxy`: optional `sessionId` hint | ✅ Complete |
 | 2 | Rename `ClientSessionManager` → `RequestSessionManager` | ⏳ Not started |
 | 3 | `RequestProxy` class replaces factory function | ⏳ Not started |
 | 4 | `extension.ts` uses `RequestProxy` | ⏳ Not started |
