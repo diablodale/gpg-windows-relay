@@ -72,9 +72,12 @@ request-proxy/
       gpgCliIntegration.test.ts
 ```
 
-**`test:integration` npm script** in `agent-proxy/package.json`:
+**Integration test npm scripts** in `agent-proxy/package.json`:
 ```json
-"test:integration": "tsc --build tsconfig.test.json && node out/test/integration/runTest.js"
+"compile:integration": "tsc --build tsconfig.test.json",
+"lint:integration":    "eslint src",
+"pretest:integration": "npm run compile:integration && npm run lint:integration",
+"test:integration":    "node out/test/integration/runTest.js"
 ```
 
 **Structure of `runTest.ts`:**
@@ -125,7 +128,7 @@ Both `agent-proxy/tsconfig.json` and `shared/tsconfig.json` have `rootDir: src` 
   - sets `rootDir` to `.` (the package root)
   - adds `"test/integration/**"` to `include`
   - sets `outDir` to `out` (same output tree, so `out/test/integration/*.js` lands correctly)
-- The `test:integration` npm script runs `tsc --build tsconfig.test.json && node out/test/integration/runTest.js`
+- The `pretest:integration` hook runs `compile:integration` + `lint:integration` automatically before `test:integration`. The `test:integration` script itself only invokes the Node.js runner (`node out/test/integration/runTest.js`). See each package's `package.json` for the full script set.
 - Affected packages: `agent-proxy`, `shared`
 
 The custom runner output (`runTest.js`) lands in
@@ -303,24 +306,29 @@ Key implementation notes:
    (workspace → ui) conirmed works. VS Code correctly loads `request-proxy` in the
    remote extension host even when the `local.gpg-agent-proxy` dependency lives in the local host.
 
-### Open Questions (Deferred)
+### Resolved: Previously Open Questions
 
-3. **Phase 3 keys** *(deferred until after Phase 1 is successfully implemented)*: Do you have a
-   GPG key on the Windows keyring that can be exported into the container for sign/encrypt tests,
-   or should the plan create a fresh key inside the container and re-import it to the Windows
-   keyring as part of test setup?
+3. **Phase 3 keys** — *Resolved.* The runner generates a throwaway key in the Windows process
+   (`runTest.ts`), exports its ASCII-armored public key, and forwards it to the container via
+   `PUBKEY_ARMORED_KEY` env var. The container's `before()` imports the public key into the Linux
+   `GNUPGHOME`. The private key never leaves Windows; all signing flows through `agent-proxy`.
 
 ---
 
 ## Phase 1 — `agent-proxy` ↔ Real gpg-agent
 
+**Status: Complete. All 9 tests passing (9/9).**
+
 **Constraint:** Runs on Windows host only. `agent-proxy` is a Windows-only extension.
 
 **Location:** `agent-proxy/test/integration/agentProxyIntegration.test.ts`
 
-**New npm script** in `agent-proxy/package.json`:
+**Integration test npm scripts** in `agent-proxy/package.json`:
 ```json
-"test:integration": "tsc --build tsconfig.test.json && node out/test/integration/runTest.js"
+"compile:integration": "tsc --build tsconfig.test.json",
+"lint:integration":    "eslint src",
+"pretest:integration": "npm run compile:integration && npm run lint:integration",
+"test:integration":    "node out/test/integration/runTest.js"
 ```
 
 ### Setup / Teardown
@@ -453,12 +461,10 @@ and the test agent's socket is live.
 
 ## Phase 2 — `request-proxy` → `agent-proxy` → Real gpg-agent
 
-**Status: Test infrastructure implemented. Runner validation pending.**
+**Status: Complete. All 8 tests passing (8/8).**
 
-All test files, configs, and infrastructure are in place. What remains is validating the
-`--remote dev-container+<uri>` runner approach experimentally (see `runTest.ts` header for the
-four open unknowns). Run `cd request-proxy && npm run test:integration` once the container URI
-is confirmed.
+The `--remote dev-container+<uri>` runner approach works as designed. All four previously-open
+experimental unknowns are resolved; see the Automated Runner Approach section below for details.
 
 ### Implementation summary
 
@@ -490,12 +496,17 @@ creates.
 
 **Location:** `request-proxy/test/integration/requestProxyIntegration.test.ts`
 
-**New npm script** in `request-proxy/package.json`:
+**Integration test npm scripts** in `request-proxy/package.json`:
 ```json
-"test:integration": "tsc --build tsconfig.test.json && node out/test/integration/runTest.js"
+"compile:integration":            "tsc --build tsconfig.test.json",
+"lint:integration":               "eslint src",
+"pretest:integration":            "npm run compile:integration && npm run lint:integration",
+"test:integration":               "npm run test:integration:request-proxy && npm run test:integration:gpg-cli",
+"test:integration:request-proxy": "node out/test/integration/requestProxyRunTest.js",
+"test:integration:gpg-cli":       "node out/test/integration/gpgCliRunTest.js"
 ```
 
-### Proposed Automated Runner Approach *(validate after Phase 1)*
+### Automated Runner Approach *(validated)*
 
 The goal is a fully automated `npm run test:integration` — no manual "Reopen in Container" click.
 The key insight: `@vscode/test-electron`'s `runTests()` accepts arbitrary `launchArgs` passed
@@ -541,20 +552,19 @@ marketplace IDs — it is not limited to one or the other. However, `defineConfi
 here because it has no pre-launch lifecycle hook; `cli.launchAgent()` must run before
 `activate()` fires (same reason as Phase 1).
 
-**Unknowns to validate experimentally after Phase 1:**
+**All unknowns resolved experimentally:**
 
-1. **`extensionTestsEnv` propagation**: Does it inject into the Windows local host (where
-   `agent-proxy` needs `GNUPGHOME`), the remote host, or both? This is the critical unknown.
-   If it only reaches the remote host, `agent-proxy` cannot see the isolated `GNUPGHOME` and
-   will use the real Windows keyring instead.
-2. **`extensionDevelopmentPath` routing**: Does VS Code correctly route each path to the
-   appropriate host based on `extensionKind` when `--remote` is active?
-3. **`extensionTestsPath` location**: Does the Mocha suite run in the remote (Linux) host where
-   the Unix domain socket exists? It must for `AssuanSocketClient` to connect.
-4. **`--install-extension` + `--remote` ordering**: Does installing `remote-containers` in the
-   same `launchArgs` invocation as `--remote dev-container+<uri>` work, or does it require a
-   separate pre-install step? Does the container URI format require the container to already be
-   running?
+1. **`extensionTestsEnv` propagation** ✅ — Propagates to both hosts. The Windows local host
+   receives `GNUPGHOME` (used by `agent-proxy` during `activate()`), and the remote host also
+   receives it. Both extensions see a consistent isolated keyring.
+2. **`extensionDevelopmentPath` routing** ✅ — VS Code correctly routes `agent-proxy`
+   (`extensionKind: ["ui"]`) to the local Windows host and `request-proxy`
+   (`extensionKind: ["workspace"]`) to the remote Linux host.
+3. **`extensionTestsPath` location** ✅ — The Mocha suite runs in the remote (Linux) host where
+   the Unix domain socket exists. `AssuanSocketClient` connects successfully.
+4. **`--install-extension` + `--remote` ordering** ✅ — The `ms-vscode-remote.remote-containers`
+   extension must be pre-installed in the test VS Code instance (handled via `launchArgs`). The
+   dev container must already be running before `runTests()` is invoked.
 
 ### Setup / Teardown
 
@@ -586,8 +596,6 @@ here because it has no pre-launch lifecycle hook; `cli.launchAgent()` must run b
 [Mocha after()]
   - await instance.stop()
 ```
-
-*All of the above is contingent on the unknowns being resolved after Phase 1.*
 
 ### Test Cases
 
@@ -633,7 +641,9 @@ here because it has no pre-launch lifecycle hook; `cli.launchAgent()` must run b
 
 ---
 
-## Phase 3 — `gpg.exe` → `request-proxy` → `agent-proxy` → gpg-agent *(implemented)*
+## Phase 3 — `gpg.exe` → `request-proxy` → `agent-proxy` → gpg-agent
+
+**Status: Complete. All 7 tests passing (7/7).**
 
 **Constraint:** Phase 3 exercises the full end-to-end chain with a real `gpg` binary on Linux
 calling through the relay to the Windows gpg-agent. `gnupg2` must be installed in the remote;
@@ -777,36 +787,44 @@ See `.devcontainer/phase3/devcontainer.json` and `gpgCliRunTest.ts` for details.
 
 ## Running the Tests
 
-### Phase 1 (Windows only)
+`pretest:integration` runs `compile:integration` and `lint:integration` automatically before
+any `test:integration` script — no manual compile step required.
+
+### All phases (from repo root)
 ```powershell
-# 1. Build and package both extensions
-npm run package
-# 2. Run integration tests
+npm run test:integration
+# Runs Phase 1 (agent-proxy), then Phase 2 + Phase 3 (request-proxy) in sequence.
+# Prerequisite: Phase 2 dev container and Phase 3 dev container must already be running.
+```
+
+### Phase 1 — agent-proxy (Windows only)
+```powershell
 cd agent-proxy
 npm run test:integration
-# runTest.js: mkdtempSync unique dir, launches isolated gpg-agent,
-# generates test key, starts extension host with GNUPGHOME set, runs tests, cleans up
+# pretest:integration compiles + lints automatically.
+# Runner: mkdtempSync unique GNUPGHOME, launches isolated gpg-agent,
+#         generates throwaway test key, starts extension host, runs 9 tests, cleans up.
 ```
 
-### Phase 2 *(approach TBD — validate after Phase 1)*
+### Phase 2 — request-proxy (dev container)
 ```powershell
-# 1. Build both extensions
-npm run compile
-# 2. Run integration tests (runTest.ts fires VS Code with --remote dev-container+<uri>)
+# Prerequisite: Phase 2 dev container must be running (ubuntu-22.04, no gpg).
 cd request-proxy
-npm run test:integration
+npm run test:integration:request-proxy
+# pretest:integration compiles + lints automatically.
+# Runner: fires VS Code with --remote dev-container+<uri>; agent-proxy loads on Windows,
+#         request-proxy loads in container; AssuanSocketClient talks to the Unix socket.
 ```
-If the automated `--remote dev-container+<uri>` approach proves unworkable, WSL is the next
-fallback (`--remote wsl+Ubuntu-22.04`), then manual "Reopen in Container" as last resort.
 
-### Phase 3 *(implemented)*
+### Phase 3 — gpg CLI end-to-end (dev container)
 ```powershell
-# 1. Build both extensions
-npm run compile
-# 2. Compile integration test files
-# 3. Run integration tests (gpgCliRunTest.ts fires VS Code in the phase3 dev container)
+# Prerequisite: Phase 3 dev container must be running (ubuntu-22.04 + gnupg2).
 cd request-proxy
-npm run test:integration:phase3
+npm run test:integration:gpg-cli
+# pretest:integration compiles + lints automatically.
+# Runner: fires VS Code with --remote dev-container+<uri> (phase3 config); exports
+#         throwaway Windows public key via PUBKEY_ARMORED_KEY env var; container
+#         imports it and runs 7 gpg CLI tests through the full proxy chain.
 ```
 
 ## Decisions
@@ -824,9 +842,9 @@ npm run test:integration:phase3
 | `GpgCli` shared via `@gpg-relay/shared/test/integration` | All gpg/gpgconf calls needed by all phases; avoids duplication and scattered spawnSync |
 | Phase 2/3 use `runTests()` + `launchArgs: ['--remote', 'dev-container+<uri>', ...]` | VS Code `extensionKind` routing loads `agent-proxy` locally and `request-proxy` remotely from a single test invocation; `runTest.ts` keeps the pre-launch gpg-agent lifecycle hook that `defineConfig` lacks; dev container is preferred over WSL because `devcontainer.json` declaratively defines all dependencies (image, `gnupg2`, env vars) making it reproducible and isolated from personal machine state. Refs: [vscode-test](https://github.com/Microsoft/vscode-test#readme), [vscode-test-cli](https://github.com/microsoft/vscode-test-cli/blob/main/README.md), [defineConfig schema](https://github.com/microsoft/vscode-test-cli/blob/main/src/config.cts) |
 | `installExtensions` / `--install-extension` accepts both marketplace IDs and `.vsix` paths | No need for `fromMachine: true`; the bare downloaded test VS Code can have `ms-vscode-remote.remote-containers` (or `remote-wsl` as fallback) added via `launchArgs`, keeping the environment isolated from the developer's real VS Code install |
-| Phase 2/3 `extensionTestsEnv` propagation is an open unknown | If env vars only reach the remote host, `agent-proxy` (Windows local host) won't see `GNUPGHOME`; fallback options include a VS Code workspace setting override or a dedicated agent-proxy command that accepts a GNUPGHOME path — to be resolved experimentally after Phase 1 |
+| Phase 2/3 `extensionTestsEnv` propagation reaches both hosts | Validated experimentally: env vars propagate to both the Windows local host (used by `agent-proxy`) and the remote host (used by `request-proxy`). Both extensions see a consistent isolated `GNUPGHOME`. |
 | Phase 3 test key: private on Windows, only public exported to Linux | Linux `gpg` only needs the public key to address key operations by fingerprint; private key stays on Windows so all signing flows through `agent-proxy` to the real gpg-agent; public key is exported to a path accessible from the container |
-| Phase 2/3 fallback: manual "Reopen in Container" | If automated `--remote` in `launchArgs` proves unworkable, the fallback runs tests from a terminal inside the container after manually connecting VS Code Remote; Windows-side isolation remains unsolved in that path |
+| Phase 2/3 automated `--remote dev-container+<uri>` works; fallback not needed | The automated approach validated successfully. Manual "Reopen in Container" fallback was not required. |
 | Phase 3 has its own `devcontainer.json` at `.devcontainer/phase3/devcontainer.json` | Phase 2 has no gpg binary; Phase 3 needs gnupg2. Separate configs prevent Phase 2 from accidentally pulling in the gpg install and keep the two test environments isolated. `runTest.ts` / `gpgCliRunTest.ts` each reference their own config file via the serialized URI object format. |
 | Phase 3 `GNUPGHOME` split: Windows path via `extensionTestsEnv`; Linux path static in `devcontainer.json` | `extensionTestsEnv` propagates to both Windows local host and remote host in VS Code's test setup. Agent-proxy (Windows) uses the Windows `GNUPGHOME` path it inherits from `extensionTestsEnv`. The container's gpg CLI and request-proxy use the static Linux path `/tmp/gpg-test-phase3` set in `remoteEnv` — no Windows path forwarded to Linux to avoid confusion. |
 | Phase 3 public key: passed as `PUBKEY_ARMORED_KEY` env var | `exportPublicKey()` already returns an ASCII-armored string. An Ed25519 armored public key is ~350 chars — well within the 32,767-char Win32 env var limit. Eliminates the intermediate file write, workspace bind mount dependency, container-visible path calculation, and cleanup step in the runner's `finally` block. `devcontainer.json` remoteEnv forwards it via `${localEnv:PUBKEY_ARMORED_KEY}`; `before()` calls `importPublicKey(process.env.PUBKEY_ARMORED_KEY)` directly. |
