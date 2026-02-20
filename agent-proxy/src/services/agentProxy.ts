@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import { log, encodeProtocolData, decodeProtocolData, parseSocketFile, extractErrorMessage, sanitizeForLog, detectResponseCompletion, cleanupSocket } from '@gpg-relay/shared';
-import type { LogConfig, IFileSystem, ISocketFactory } from '@gpg-relay/shared';
+import type { LogConfig, IFileSystem, ISocketFactory, ISessionManager } from '@gpg-relay/shared';
 
 // ============================================================================
 // State Machine Type Definitions
@@ -157,7 +157,7 @@ interface AgentProxyDeps {
  * Per-session state machine extending EventEmitter
  * Manages single agent connection lifecycle with explicit state tracking
  */
-export class AgentSessionManager extends EventEmitter {
+export class AgentSessionManager extends EventEmitter implements ISessionManager {
     public readonly sessionId: string;
     private state: SessionState = 'DISCONNECTED';
     private socket: net.Socket | null = null;

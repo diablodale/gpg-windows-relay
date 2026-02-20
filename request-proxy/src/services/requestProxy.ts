@@ -18,7 +18,7 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { spawnSync } from 'child_process';
 import { log, encodeProtocolData, decodeProtocolData, sanitizeForLog, extractErrorMessage, cleanupSocket, extractCommand, extractInquireBlock, detectResponseCompletion } from '@gpg-relay/shared';
-import type { LogConfig, ICommandExecutor, IFileSystem, IServerFactory } from '@gpg-relay/shared';
+import type { LogConfig, ICommandExecutor, IFileSystem, IServerFactory, ISessionManager } from '@gpg-relay/shared';
 import { VSCodeCommandExecutor } from './commandExecutor';
 
 // ============================================================================
@@ -182,7 +182,7 @@ interface ClientSession {
  * Events drive state transitions and processing logic.
  * Handlers are registered for events (like socket.on('data', handler))
  */
-class ClientSessionManager extends EventEmitter {
+class ClientSessionManager extends EventEmitter implements ISessionManager {
     public readonly config: RequestProxyConfigWithExecutor;
     public socket: net.Socket;
     public sessionId: string | null = null;

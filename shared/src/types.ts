@@ -99,3 +99,25 @@ export interface IServerFactory {
         connectionListener: (socket: net.Socket) => void
     ): net.Server;
 }
+
+/**
+ * Common interface for per-session state machine managers.
+ * Implemented by AgentSessionManager (agent-proxy) and ClientSessionManager (request-proxy).
+ *
+ * sessionId is nullable to accommodate the request-proxy connection setup phase, during
+ * which the session ID is not yet known until the agent-proxy assigns one.
+ * After the single-sessionId refactor, both managers will have non-nullable sessionId.
+ */
+export interface ISessionManager {
+    /**
+     * Unique identifier for this session.
+     * Null only during initial connection setup in request-proxy (before agent assigns an ID).
+     */
+    readonly sessionId: string | null;
+
+    /**
+     * Get the current state of the session state machine.
+     * Returns a string to accommodate differing SessionState union types across extensions.
+     */
+    getState(): string;
+}
