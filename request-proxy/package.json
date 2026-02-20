@@ -62,13 +62,16 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc --build",
+    "compile:integration": "tsc --build tsconfig.test.json",
     "watch": "tsc --build --watch",
     "pretest": "npm run compile && npm run lint",
+    "pretest:integration": "npm run compile:integration && npm run lint:integration",
     "lint": "eslint src",
+    "lint:integration": "eslint src",
     "test": "vscode-test",
     "test:integration": "npm run test:integration:request-proxy && npm run test:integration:gpg-cli",
-    "test:integration:request-proxy": "tsc --build tsconfig.test.json && node out/test/integration/requestProxyRunTest.js",
-    "test:integration:gpg-cli": "tsc --build tsconfig.test.json && node out/test/integration/gpgCliRunTest.js",
+    "test:integration:request-proxy": "node out/test/integration/requestProxyRunTest.js",
+    "test:integration:gpg-cli": "node out/test/integration/gpgCliRunTest.js",
     "package": "vsce package"
   },
   "dependencies": {

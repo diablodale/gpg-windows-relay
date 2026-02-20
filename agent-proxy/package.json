@@ -77,11 +77,14 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc --build",
+    "compile:integration": "tsc --build tsconfig.test.json",
     "watch": "tsc --build --watch",
     "pretest": "npm run compile && npm run lint",
+    "pretest:integration": "npm run compile:integration && npm run lint:integration",
     "lint": "eslint src",
+    "lint:integration": "eslint src",
     "test": "vscode-test",
-    "test:integration": "tsc --build tsconfig.test.json && node out/test/integration/runTest.js",
+    "test:integration": "node out/test/integration/runTest.js",
     "package": "vsce package"
   },
   "dependencies": {
