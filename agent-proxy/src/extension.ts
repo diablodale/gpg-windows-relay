@@ -77,13 +77,13 @@ export function deactivate() {
  * Called by request-proxy to establish a connection to gpg-agent.
  * Returns a sessionId and greeting that must be relayed to the client.
  */
-async function connectAgent(): Promise<{ sessionId: string; greeting: string }> {
+async function connectAgent(sessionId?: string): Promise<{ sessionId: string; greeting: string }> {
 	if (!agentProxyService) {
 		throw new Error('Agent proxy not initialized. Please start the extension.');
 	}
 
 	try {
-		const result = await agentProxyService.connectAgent();
+		const result = await agentProxyService.connectAgent(sessionId);
 		outputChannel.appendLine(`[connectAgent] Session created: ${result.sessionId}`);
 		outputChannel.appendLine(`[connectAgent] Returning: ${JSON.stringify(result)}`);
 		return result;

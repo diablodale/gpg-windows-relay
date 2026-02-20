@@ -71,8 +71,11 @@ export interface ICommandExecutor {
     /**
      * Connect to the GPG agent via agent-proxy extension.
      * Returns a unique session ID and the agent's greeting message.
+     *
+     * @param sessionId Optional caller-supplied UUID hint; agent-proxy uses it if provided,
+     *                  otherwise generates its own. Allows both sides to log the same ID.
      */
-    connectAgent(): Promise<{ sessionId: string; greeting: string }>;
+    connectAgent(sessionId?: string): Promise<{ sessionId: string; greeting: string }>;
 
     /**
      * Send Assuan protocol commands to the GPG agent.

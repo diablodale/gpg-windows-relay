@@ -18,9 +18,13 @@ export class VSCodeCommandExecutor implements ICommandExecutor {
      * @returns Session ID and agent greeting message
      * @throws Error if command fails or extension not available
      */
-    async connectAgent(): Promise<{ sessionId: string; greeting: string }> {
+    async connectAgent(sessionId?: string): Promise<{ sessionId: string; greeting: string }> {
+        // Do not pass undefined explicitly — VS Code serialises it as null across the
+        // extension IPC boundary, which bypasses the default-parameter in connectAgent()
+        // and causes all sessions to share a null key in the sessions Map.
         return vscode.commands.executeCommand(
-            '_gpg-agent-proxy.connectAgent'
+            '_gpg-agent-proxy.connectAgent',
+            ...(sessionId !== undefined ? [sessionId] : [])
         ) as Promise<{ sessionId: string; greeting: string }>;
     }
 

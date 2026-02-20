@@ -354,8 +354,8 @@ export class MockCommandExecutor implements ICommandExecutor {
     public sendCommandsError: Error | null = null;
     public disconnectAgentError: Error | null = null;
 
-    async connectAgent(): Promise<{ sessionId: string; greeting: string }> {
-        this.calls.push({ method: 'connectAgent', args: [] });
+    async connectAgent(sessionId?: string): Promise<{ sessionId: string; greeting: string }> {
+        this.calls.push({ method: 'connectAgent', args: [sessionId] });
         if (this.connectAgentError) {
             throw this.connectAgentError;
         }

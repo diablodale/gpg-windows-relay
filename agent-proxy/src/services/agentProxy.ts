@@ -659,6 +659,9 @@ export class AgentProxy {
      * - Emits CLIENT_CONNECT_REQUESTED to initiate connection
      * - Promise resolves when greeting received, rejects on timeout or error
      *
+     * @param sessionId Optional caller-supplied UUID hint. When provided by request-proxy,
+     *                  both extensions log the same identifier for the end-to-end session.
+     *                  Falls back to a freshly generated UUID if omitted.
      * @returns Promise resolving to object with sessionId (UUID) and greeting response
      * @throws Connection timeout (5s), greeting timeout (5s), socket errors, validation errors
      *
@@ -666,8 +669,7 @@ export class AgentProxy {
      * const { sessionId, greeting } = await agentProxy.connectAgent();
      * console.log(`Connected with session ${sessionId}: ${greeting}`);
      */
-    public async connectAgent(): Promise<{ sessionId: string; greeting: string }> {
-        const sessionId = uuidv4();
+    public async connectAgent(sessionId: string = uuidv4()): Promise<{ sessionId: string; greeting: string }> {
         log(this.config, `[${sessionId}] Create session to gpg-agent...`);
 
         try {
