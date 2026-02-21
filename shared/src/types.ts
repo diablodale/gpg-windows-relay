@@ -105,18 +105,16 @@ export interface IServerFactory {
 
 /**
  * Common interface for per-session state machine managers.
- * Implemented by AgentSessionManager (agent-proxy) and ClientSessionManager (request-proxy).
+ * Implemented by AgentSessionManager (agent-proxy) and RequestSessionManager (request-proxy).
  *
- * sessionId is nullable to accommodate the request-proxy connection setup phase, during
- * which the session ID is not yet known until the agent-proxy assigns one.
- * After the single-sessionId refactor, both managers will have non-nullable sessionId.
+ * Both managers assign sessionId at construction time, so it is always non-nullable.
  */
 export interface ISessionManager {
     /**
      * Unique identifier for this session.
-     * Null only during initial connection setup in request-proxy (before agent assigns an ID).
+     * Assigned at construction; never null.
      */
-    readonly sessionId: string | null;
+    readonly sessionId: string;
 
     /**
      * Get the current state of the session state machine.

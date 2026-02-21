@@ -395,13 +395,13 @@ with a `RequestProxy` class.
 Now that `RequestSessionManager.sessionId` is set at construction, both managers have
 `readonly sessionId: string`. Tighten the shared interface.
 
-- [ ] **5.1** `shared/src/types.ts`: change `ISessionManager.sessionId` from
+- [x] **5.1** `shared/src/types.ts`: change `ISessionManager.sessionId` from
   `string | null` to `string`
-- [ ] **5.2** Update JSDoc on `ISessionManager` to remove nullable caveat
-- [ ] **5.3** Compile full repo (`npm run compile`), run all tests (`npm test` +
+- [x] **5.2** Update JSDoc on `ISessionManager` to remove nullable caveat
+- [x] **5.3** Compile full repo (`npm run compile`), run all tests (`npm test` +
   `npm run test:integration`), verify clean
-- [ ] **5.4** Commit: `refactor(shared): tighten ISessionManager.sessionId to non-nullable`
-- [ ] **5.5** ✅ Phase gate: all tests green, committed — proceed to Phase 6
+- [x] **5.4** Commit: `refactor(shared): tighten ISessionManager.sessionId to non-nullable`
+- [x] **5.5** ✅ Phase gate: all tests green, committed — proceed to Phase 6
 
 ---
 
@@ -473,5 +473,5 @@ session has fully cleaned up and been removed from the Map.
 | 2 | Rename `ClientSessionManager` → `RequestSessionManager` | ✅ Complete |
 | 3 | `RequestProxy` class replaces factory function | ✅ Complete |
 | 4 | `extension.ts` uses `RequestProxy` | ✅ Complete |
-| 5 | Tighten `ISessionManager.sessionId` | ⏳ Not started |
+| 5 | Tighten `ISessionManager.sessionId` | ✅ Complete |
 | 6 | `AgentProxy.stop()` async with deterministic cleanup | ⏳ Not started |
