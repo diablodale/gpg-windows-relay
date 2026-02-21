@@ -6,7 +6,7 @@
  */
 
 import { expect } from 'chai';
-import { startRequestProxy } from '../services/requestProxy';
+import { RequestProxy } from '../services/requestProxy';
 import { MockCommandExecutor, MockServerFactory, MockFileSystem, MockSocket, MockLogConfig } from '@gpg-relay/shared/test';
 
 describe('RequestProxy', () => {
@@ -40,10 +40,8 @@ describe('RequestProxy', () => {
             ];
 
             // Start the service to trigger validation via type system
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             // If code compiles and reaches here, transition table is properly formed
             expect(allStates).to.have.length(11);
@@ -56,10 +54,8 @@ describe('RequestProxy', () => {
             // - All keys must be valid SessionState strings
             // - All values must be valid SessionState strings
             // - TypeScript enforces this, so if code compiles, validation passes
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             expect(instance).to.exist;
             await instance.stop();
@@ -79,10 +75,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -107,10 +101,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -144,10 +136,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -173,10 +163,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -202,10 +190,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -232,10 +218,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setDisconnectAgentError(new Error('Disconnect failed'));
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -268,10 +252,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -303,10 +285,8 @@ describe('RequestProxy', () => {
 
     describe('server initialization', () => {
         it('should create Unix socket server at correct path', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             expect(mockServerFactory.getServers()).to.have.length(1);
             const server = mockServerFactory.getServers()[0];
@@ -316,10 +296,8 @@ describe('RequestProxy', () => {
         });
 
         it('should create socket directory if it does not exist', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             expect(mockFileSystem.getCallCount('mkdirSync')).to.be.greaterThan(0);
 
@@ -327,10 +305,8 @@ describe('RequestProxy', () => {
         });
 
         it('should set socket permissions to 0o666', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             expect(mockFileSystem.getCallCount('chmodSync')).to.be.greaterThan(0);
 
@@ -340,10 +316,8 @@ describe('RequestProxy', () => {
 
     describe('client connection pool', () => {
         it('should accept client connections', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -355,10 +329,8 @@ describe('RequestProxy', () => {
         });
 
         it('should handle multiple simultaneous clients', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const client1 = server.simulateClientConnection();
@@ -375,10 +347,8 @@ describe('RequestProxy', () => {
 
     describe('state machine: SEND_COMMAND', () => {
         it('should connect to agent on client connection', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -397,10 +367,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK GPG-Agent 2.2.19\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -415,10 +383,8 @@ describe('RequestProxy', () => {
         });
 
         it('should extract complete command lines from client', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -445,10 +411,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -473,10 +437,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK agent version response\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -495,10 +457,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('INQUIRE DATA\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -518,10 +478,8 @@ describe('RequestProxy', () => {
         });
 
         it('should wait for D block followed by END before responding', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             expect(server).to.exist;
@@ -532,10 +490,8 @@ describe('RequestProxy', () => {
 
     describe('error handling', () => {
         it('should destroy socket on write error', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -554,10 +510,8 @@ describe('RequestProxy', () => {
         it('should handle command executor errors', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Agent not available'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -571,10 +525,8 @@ describe('RequestProxy', () => {
         });
 
         it('should log client socket errors', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -595,10 +547,8 @@ describe('RequestProxy', () => {
 
     describe('server lifecycle', () => {
         it('should stop gracefully and clean up socket', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             expect(server.listening).to.equal(true);
@@ -610,10 +560,8 @@ describe('RequestProxy', () => {
         });
 
         it('should disconnect agent when client closes', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -640,10 +588,8 @@ describe('RequestProxy', () => {
             // This test validates that all states have handlers via TypeScript compile-time checking
             // The stateHandlers map in requestProxy.ts must have entries for all SessionState values
             // If code compiles, this validation passes
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
             expect(instance).to.exist;
             await instance.stop();
         });
@@ -652,10 +598,8 @@ describe('RequestProxy', () => {
             // Transition table validation happens at compile-time via TypeScript types
             // transitionTable: Record<SessionState, Record<string, SessionState>>
             // This ensures all transitions are to valid states
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
             expect(instance).to.exist;
             await instance.stop();
         });
@@ -663,10 +607,8 @@ describe('RequestProxy', () => {
         it('should handle agent connection errors and destroy socket', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Connection refused'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -689,10 +631,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -720,10 +660,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK GPG-Agent 2.2.19\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -758,10 +696,8 @@ describe('RequestProxy', () => {
             // First command triggers INQUIRE
             mockCommandExecutor.setSendCommandsResponse('INQUIRE PASSPHRASE\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -797,10 +733,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('INQUIRE PASSPHRASE\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -843,10 +777,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK GPG-Agent 2.2.19\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -888,10 +820,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK GPG-Agent ready\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
 
@@ -922,10 +852,8 @@ describe('RequestProxy', () => {
                 greeting: testGreeting
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -941,10 +869,8 @@ describe('RequestProxy', () => {
         it('should transition to ERROR state when agent connection fails', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Agent unreachable'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -966,10 +892,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK ready\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -990,10 +914,8 @@ describe('RequestProxy', () => {
         it('should handle socket errors during CONNECTING_TO_AGENT', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Network error'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1016,10 +938,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1053,10 +973,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1075,10 +993,8 @@ describe('RequestProxy', () => {
         });
 
         it('should log socket error events', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1098,10 +1014,8 @@ describe('RequestProxy', () => {
         });
 
         it('should create server and start listening on socket path', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const servers = mockServerFactory.getServers();
             expect(servers).to.have.length(1);
@@ -1112,10 +1026,8 @@ describe('RequestProxy', () => {
         });
 
         it('should stop server and cleanup socket on instance.stop()', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             expect(server.listening).to.equal(true);
@@ -1133,10 +1045,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
 
@@ -1164,10 +1074,8 @@ describe('RequestProxy', () => {
         });
 
         it('should handle concurrent client connections', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
 
@@ -1199,10 +1107,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1225,10 +1131,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK GPG-Agent 2.2.19\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1260,10 +1164,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1290,10 +1192,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1319,10 +1219,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1345,10 +1243,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1372,10 +1268,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1409,10 +1303,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1438,10 +1330,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1467,10 +1357,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('INQUIRE PASSPHRASE\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1508,10 +1396,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('INQUIRE DATA\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1544,10 +1430,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('INQUIRE DATA\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1580,10 +1464,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('INQUIRE DATA\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1621,10 +1503,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('INQUIRE DATA\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1652,10 +1532,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('INQUIRE DATA\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1694,10 +1572,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('INQUIRE DATA\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1725,10 +1601,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('INQUIRE DATA\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1760,10 +1634,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1797,10 +1669,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1830,10 +1700,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1860,10 +1728,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1896,10 +1762,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1930,10 +1794,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -1974,10 +1836,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2002,10 +1862,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2040,10 +1898,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2073,10 +1929,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2108,10 +1962,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2148,10 +2000,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2183,10 +2033,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2220,10 +2068,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2253,10 +2099,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2287,10 +2131,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2319,10 +2161,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2355,10 +2195,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2382,10 +2220,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2411,10 +2247,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2448,10 +2282,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2492,10 +2324,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2525,10 +2355,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2564,10 +2392,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2600,10 +2426,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2638,10 +2462,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2666,10 +2488,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2698,10 +2518,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2734,10 +2552,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2766,10 +2582,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2819,10 +2633,8 @@ describe('RequestProxy', () => {
         it('should transition to ERROR state on agent connection failure', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Connection refused'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2841,10 +2653,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsError(new Error('Send failed'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2864,10 +2674,8 @@ describe('RequestProxy', () => {
             const logs: string[] = [];
             mockCommandExecutor.setConnectAgentError(new Error('Test error'));
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             server.simulateClientConnection();
@@ -2888,10 +2696,8 @@ describe('RequestProxy', () => {
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
             const logs: string[] = [];
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2920,10 +2726,8 @@ describe('RequestProxy', () => {
             const logs: string[] = [];
             mockCommandExecutor.setConnectAgentError(new Error('Connection failed'));
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             server.simulateClientConnection();
@@ -2948,10 +2752,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsError(new Error('Send failed'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2970,10 +2772,8 @@ describe('RequestProxy', () => {
         it('should destroy socket on cleanup complete', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Connection error'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -2994,10 +2794,8 @@ describe('RequestProxy', () => {
             mockCommandExecutor.setSendCommandsError(new Error('Send error'));
             mockCommandExecutor.setDisconnectAgentError(new Error('Disconnect failed'));
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3017,10 +2815,8 @@ describe('RequestProxy', () => {
         it('should clear event listeners during cleanup', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Connection error'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3035,10 +2831,8 @@ describe('RequestProxy', () => {
         it('should clear session buffer during cleanup', async () => {
             mockCommandExecutor.setConnectAgentError(new Error('Connection error'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3062,10 +2856,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3093,10 +2885,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsError(new Error('Send failed'));
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3117,10 +2907,8 @@ describe('RequestProxy', () => {
         });
 
         it('should handle rapid connect/disconnect cycles', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
 
@@ -3141,10 +2929,8 @@ describe('RequestProxy', () => {
         it('should handle socket errors during various states', async () => {
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3169,10 +2955,8 @@ describe('RequestProxy', () => {
         it('should complete full session teardown after client disconnects', async () => {
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3195,10 +2979,8 @@ describe('RequestProxy', () => {
         it('should support multiple sequential sessions reusing same server', async () => {
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
 
@@ -3226,10 +3008,8 @@ describe('RequestProxy', () => {
         });
 
         it('should accept new connections in DISCONNECTED state after cleanup', async () => {
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
 
@@ -3252,10 +3032,8 @@ describe('RequestProxy', () => {
         it('should not leak session data into new sessions', async () => {
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
 
@@ -3292,10 +3070,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsError(new Error('Send failed to trigger cleanup'));
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3323,10 +3099,8 @@ describe('RequestProxy', () => {
             const logs: string[] = [];
             mockCommandExecutor.setConnectAgentError(new Error('Connection failed to trigger cleanup'));
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3348,10 +3122,8 @@ describe('RequestProxy', () => {
             const logs: string[] = [];
             mockCommandExecutor.setConnectAgentError(new Error('Connection failed'));
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3382,10 +3154,8 @@ describe('RequestProxy', () => {
             mockCommandExecutor.setSendCommandsError(new Error('Trigger cleanup'));
             mockCommandExecutor.setDisconnectAgentError(new Error('Disconnect failed'));
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3418,10 +3188,8 @@ describe('RequestProxy', () => {
             mockCommandExecutor.setSendCommandsError(new Error('Send failed'));
             mockCommandExecutor.setDisconnectAgentError(new Error('Disconnect failed'));
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3457,10 +3225,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK version info\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3492,10 +3258,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK version info\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3525,10 +3289,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3558,10 +3320,8 @@ describe('RequestProxy', () => {
                 });
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3593,10 +3353,8 @@ describe('RequestProxy', () => {
                 greeting: 'OK\n'
             };
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3628,10 +3386,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3658,10 +3414,8 @@ describe('RequestProxy', () => {
 
         it('should transition from multiple socket-having states to CLOSING', async () => {
             // Test CLEANUP_REQUESTED from CONNECTING_TO_AGENT state
-            const instance = await startRequestProxy(
-                { logCallback: mockLogConfig.logCallback },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: mockLogConfig.logCallback }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();
@@ -3687,10 +3441,8 @@ describe('RequestProxy', () => {
             };
             mockCommandExecutor.setSendCommandsResponse('OK\n');
 
-            const instance = await startRequestProxy(
-                { logCallback: (msg) => logs.push(msg) },
-                createMockDeps()
-            );
+            const instance = new RequestProxy({ logCallback: (msg) => logs.push(msg) }, createMockDeps());
+            await instance.start();
 
             const server = mockServerFactory.getServers()[0];
             const clientSocket = server.simulateClientConnection();

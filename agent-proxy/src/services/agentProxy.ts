@@ -197,7 +197,7 @@ export class AgentSessionManager extends EventEmitter implements ISessionManager
     }
 
     // ========================================================================
-    // Event Handlers (Phase 4: full implementation)
+    // Event Handlers
     // ========================================================================
 
     /**

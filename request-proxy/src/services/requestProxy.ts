@@ -590,9 +590,6 @@ export class RequestProxy {
         this.usingMocks = !!(deps?.serverFactory || deps?.fileSystem);
     }
 
-    /** Backward-compat socket path accessor; Phase 4 migrates callers to getSocketPath() */
-    get socketPath(): string | null { return this._socketPath; }
-
     /** Socket path this proxy is listening on, or null if not started */
     getSocketPath(): string | null { return this._socketPath; }
 
@@ -764,16 +761,6 @@ export class RequestProxy {
             }
         });
     }
-}
-
-/**
- * @deprecated Use RequestProxy class directly. This shim will be removed in Phase 4
- * when extension.ts is updated. Kept for backward-compatibility.
- */
-export async function startRequestProxy(config: RequestProxyConfig, deps?: RequestProxyDeps): Promise<RequestProxy> {
-    const proxy = new RequestProxy(config, deps);
-    await proxy.start();
-    return proxy;
 }
 
 /**
