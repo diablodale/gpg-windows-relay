@@ -17,8 +17,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
 import { spawnSync } from 'child_process';
-import { log, encodeProtocolData, decodeProtocolData, sanitizeForLog, extractErrorMessage, cleanupSocket, extractCommand, extractInquireBlock, detectResponseCompletion } from '@gpg-relay/shared';
-import type { LogConfig, ICommandExecutor, IFileSystem, IServerFactory, ISessionManager } from '@gpg-relay/shared';
+import { log, encodeProtocolData, decodeProtocolData, sanitizeForLog, extractErrorMessage, cleanupSocket, extractCommand, extractInquireBlock, detectResponseCompletion } from '@gpg-bridge/shared';
+import type { LogConfig, ICommandExecutor, IFileSystem, IServerFactory, ISessionManager } from '@gpg-bridge/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { VSCodeCommandExecutor } from './commandExecutor';
 
@@ -241,13 +241,13 @@ class RequestSessionManager extends EventEmitter implements ISessionManager {
 
     private async handleClientSocketConnected(): Promise<void> {
         this.transition('CLIENT_SOCKET_CONNECTED');
-        log(this.config, `[${this.sessionId}] Client socket connected, connecting to GPG Agent Proxy...`);
+        log(this.config, `[${this.sessionId}] Client socket connected, connecting to GPG Bridge Agent...`);
 
         try {
             // Connect to agent-proxy, passing our pre-minted sessionId as a hint so
             // both extensions log the same UUID for this end-to-end session.
             const result = await this.config.commandExecutor.connectAgent(this.sessionId);
-            log(this.config, `[${this.sessionId}] Connected to GPG Agent Proxy`);
+            log(this.config, `[${this.sessionId}] Connected to GPG Bridge Agent`);
 
             // Treat agent greeting as the first AGENT_RESPONSE_COMPLETE, then resume socket
             if (result.greeting) {
@@ -681,7 +681,7 @@ export class RequestProxy {
             session.once('CLEANUP_ERROR',    () => this.sessions.delete(sessionId));
 
             // Start connection sequence - emit initial event and let handlers do the work
-            log(fullConfig, 'Client connected to socket. Socket is paused while initiating connection to GPG Agent Proxy');
+            log(fullConfig, 'Client connected to socket. Socket is paused while initiating connection to GPG Bridge Agent');
             session.emit('CLIENT_SOCKET_CONNECTED');
         });
 

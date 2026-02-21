@@ -1,7 +1,7 @@
 /**
  * Integration test helpers — barrel export.
  *
- * Import via: import { GpgCli, AssuanSocketClient, assertSafeToDelete } from '@gpg-relay/shared/test/integration'
+ * Import via: import { GpgCli, AssuanSocketClient, assertSafeToDelete } from '@gpg-bridge/shared/test/integration'
  *
  * GpgCli: subprocess wrappers for gpg.exe / gpgconf.exe (all phases)
  * AssuanSocketClient: Assuan protocol socket test client (Phase 2 and Phase 3)

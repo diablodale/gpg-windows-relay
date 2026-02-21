@@ -45,7 +45,7 @@ Every phase ends with a full test gate before committing to git.
 
 ---
 
-## Phase 1 — Project Rename
+## Phase 1 — Project Rename ✅ COMPLETE
 
 ### Goal
 Rename every name token before any other work so that subsequent phases use the
@@ -103,6 +103,13 @@ both `extension.ts` files, and all integration test files:
 - `'gpg-request-proxy.stop'` → `'gpg-bridge-request.stop'`
 - `'_gpg-request-proxy.test.getSocketPath'` → `'_gpg-bridge-request.test.getSocketPath'`
 
+*Runner path strings* in [requestProxyRunTest.ts](../gpg-bridge-request/test/integration/requestProxyRunTest.ts)
+and [gpgCliRunTest.ts](../gpg-bridge-request/test/integration/gpgCliRunTest.ts) — hardcoded
+directory names in `extensionDevelopmentPath` and `extensionTestsPath` are not covered by the
+import-path replacements above and must be updated separately:
+- `path.join(workspaceRoot, 'agent-proxy')` → `path.join(workspaceRoot, 'gpg-bridge-agent')`
+- `.../request-proxy/out/test/...` URI segments → `.../gpg-bridge-request/out/test/...`
+
 *Configuration keys* in both `extension.ts` files and integration tests:
 - `getConfiguration('gpgAgentProxy')` → `getConfiguration('gpgBridgeAgent')`
 - `getConfiguration('gpgRequestProxy')` → `getConfiguration('gpgBridgeRequest')`
@@ -121,12 +128,18 @@ extension is referring to itself or cross-referencing the other. This covers
 log messages, error strings, and any diagnostic text produced at runtime. The
 output channel names (already covered above under UI strings) follow the same rule.
 
-**1e. Documentation** — apply name mapping to:
+**1e. Documentation and dev container config** — apply name mapping to:
 - [AGENTS.md](../AGENTS.md): command IDs, import paths, local workspace path reference
 - [CHANGELOG.md](../CHANGELOG.md): `gpg-windows-relay` → `gpg-bridge` in prose
 - [README.md](../README.md) (root): command IDs, config keys, display names, repo URL
 - [gpg-bridge-agent/README.md](../gpg-bridge-agent/README.md): command IDs, cross-references
 - [gpg-bridge-request/README.md](../gpg-bridge-request/README.md): command IDs, cross-references
+- [.devcontainer/phase2/devcontainer.json](../.devcontainer/phase2/devcontainer.json): `mounts` target
+  paths (`request-proxy/node_modules` → `gpg-bridge-request/node_modules`, `agent-proxy/node_modules`
+  → `gpg-bridge-agent/node_modules`), `updateContentCommand` directory args, Docker volume source
+  names (`gpg-relay-*` → `gpg-bridge-*`), container `name`, and comments
+- [.devcontainer/phase3/devcontainer.json](../.devcontainer/phase3/devcontainer.json): same as phase2
+  plus phase3-specific volume names (`gpg-relay-p3-*` → `gpg-bridge-p3-*`)
 - [docs/](../docs/) plan files: **do not edit** — these are historical records of
   decisions made under the old name; retroactively changing them misrepresents
   the project history. They remain valid as-written.
@@ -143,6 +156,12 @@ npm run compile
 
 # Unit tests
 npm test
+
+# If Docker containers from the old name still exist, remove them and their volumes
+# before running integration tests — the renamed devcontainer.json uses new volume
+# source names (gpg-bridge-*) so old containers will shadow the wrong directories.
+# docker ps -a --filter "label=devcontainer.local_folder" to identify them.
+# docker rm <id> ; docker volume rm gpg-relay-* gpg-relay-p3-*
 
 # Integration tests (both extensions)
 cd gpg-bridge-agent  && npm run test:integration

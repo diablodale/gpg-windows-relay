@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import { AgentProxy } from './services/agentProxy';
-import { isTestEnvironment, isIntegrationTestEnvironment, extractErrorMessage } from '@gpg-relay/shared';
+import { isTestEnvironment, isIntegrationTestEnvironment, extractErrorMessage } from '@gpg-bridge/shared';
 
 // Global agent proxy service instance
 let agentProxyService: AgentProxy | null = null;
@@ -15,21 +15,21 @@ let probeSuccessful = false;
 
 // This method is called when your extension is activated
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-	outputChannel = vscode.window.createOutputChannel('GPG Agent Proxy');
+	outputChannel = vscode.window.createOutputChannel('GPG Bridge Agent');
 	statusBarItem = vscode.window.createStatusBarItem(context.extension.id, vscode.StatusBarAlignment.Right, 100);
 
-	outputChannel.appendLine('GPG Agent Proxy activated');
+	outputChannel.appendLine('GPG Bridge Agent activated');
 
 	// Register three command handlers for inter-extension communication
 	context.subscriptions.push(
 		// Internal commands called by request-proxy extension, hidden from user with underscore prefix
-		vscode.commands.registerCommand('_gpg-agent-proxy.connectAgent', connectAgent),
-		vscode.commands.registerCommand('_gpg-agent-proxy.sendCommands', sendCommands),
-		vscode.commands.registerCommand('_gpg-agent-proxy.disconnectAgent', disconnectAgent),
+		vscode.commands.registerCommand('_gpg-bridge-agent.connectAgent', connectAgent),
+		vscode.commands.registerCommand('_gpg-bridge-agent.sendCommands', sendCommands),
+		vscode.commands.registerCommand('_gpg-bridge-agent.disconnectAgent', disconnectAgent),
 		// UI commands visible to user
-		vscode.commands.registerCommand('gpg-agent-proxy.start', startAgentProxy),
-		vscode.commands.registerCommand('gpg-agent-proxy.stop', stopAgentProxy),
-		vscode.commands.registerCommand('gpg-agent-proxy.showStatus', showStatus),
+		vscode.commands.registerCommand('gpg-bridge-agent.start', startAgentProxy),
+		vscode.commands.registerCommand('gpg-bridge-agent.stop', stopAgentProxy),
+		vscode.commands.registerCommand('gpg-bridge-agent.showStatus', showStatus),
 		outputChannel,
 		statusBarItem
 	);
@@ -37,8 +37,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	outputChannel.appendLine('Commands registered');
 
 	// Update status bar
-	statusBarItem.name = 'GPG Agent Proxy';
-	statusBarItem.command = 'gpg-agent-proxy.showStatus';
+	statusBarItem.name = 'GPG Bridge Agent';
+	statusBarItem.command = 'gpg-bridge-agent.showStatus';
 	updateStatusBar();
 	statusBarItem.show();
 
@@ -148,7 +148,7 @@ async function detectGpg4winPath(): Promise<void> {
 	if (isTestEnvironment() && !isIntegrationTestEnvironment()) {
 		return;
 	}
-	const config = vscode.workspace.getConfiguration('gpgAgentProxy');
+	const config = vscode.workspace.getConfiguration('gpgBridgeAgent');
 	const configPath = config.get<string>('gpg4winPath') || '';
 
 	// If a path is explicitly configured, use it exclusively — do not fall back to
@@ -251,7 +251,7 @@ async function startAgentProxy(): Promise<void> {
 		outputChannel.appendLine('Starting agent proxy...');
 
 		// Create a log callback that respects the debugLogging setting
-		const config = vscode.workspace.getConfiguration('gpgAgentProxy');
+		const config = vscode.workspace.getConfiguration('gpgBridgeAgent');
 		const debugLogging = config.get<boolean>('debugLogging') || true;	// TODO remove forced debug logging
 		const logCallback = debugLogging ? (message: string) => outputChannel.appendLine(message) : undefined;
 
@@ -309,7 +309,7 @@ function showStatus(): void {
 	}
 
 	const status = [
-		'GPG Agent Proxy Status',
+		'GPG Bridge Agent Status',
 		'',
 		`State: ${state}${sessionCount > 0 ? ` (${sessionCount} session${sessionCount > 1 ? 's' : ''})` : ''}`,
 		`Gpg4win: ${gpg4winPath}`,
@@ -325,16 +325,16 @@ function showStatus(): void {
  */
 function updateStatusBar(): void {
 	let icon = '$(circle-slash)';
-	let tooltip = 'GPG Agent Proxy is not ready';
+	let tooltip = 'GPG Bridge Agent is not ready';
 
 	if (agentProxyService && probeSuccessful) {
 		const sessionCount = agentProxyService.getSessionCount();
 		if (sessionCount > 0) {
 			icon = '$(sync~spin)';
-			tooltip = `GPG Agent Proxy is active with ${sessionCount} session${sessionCount > 1 ? 's' : ''}`;
+			tooltip = `GPG Bridge Agent is active with ${sessionCount} session${sessionCount > 1 ? 's' : ''}`;
 		} else {
 			icon = '$(check)';
-			tooltip = 'GPG Agent Proxy is ready';
+			tooltip = 'GPG Bridge Agent is ready';
 		}
 	}
 

@@ -1,7 +1,7 @@
 {
-  "name": "@gpg-relay/shared",
+  "name": "@gpg-bridge/shared",
   "version": "1.0.0",
-  "description": "Shared code for GPG relay extensions",
+  "description": "Shared code for GPG Bridge extensions",
   "main": "out/index.js",
   "types": "out/index.d.ts",
   "files": [

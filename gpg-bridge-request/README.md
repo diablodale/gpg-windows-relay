@@ -1,6 +1,6 @@
-# GPG Request Proxy Extension
+# GPG Bridge Request Extension
 
-VS Code extension that creates a Unix socket server on the remote GPG agent socket path. Runs on remote environments (WSL, Dev Containers, SSH) and forwards GPG protocol operations to the `agent-proxy` extension on the Windows host.
+VS Code extension that creates a Unix socket server on the remote GPG agent socket path. Runs on remote environments (WSL, Dev Containers, SSH) and forwards GPG protocol operations to the `gpg-bridge-agent` extension on the Windows host.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ The request proxy uses an **EventEmitter-based state machine** with 11 states an
 #### States (11 Total)
 
 1. **DISCONNECTED** — No client socket, ready to accept connections
-2. **CONNECTING_TO_AGENT** — Client socket accepted, connecting to agent-proxy and awaiting greeting
+2. **CONNECTING_TO_AGENT** — Client socket accepted, connecting to gpg-bridge-agent and awaiting greeting
 3. **READY** — Agent connected, ready to buffer client commands
 4. **BUFFERING_COMMAND** — Accumulating command bytes from client (until `\n`)
 5. **BUFFERING_INQUIRE** — Accumulating D-block bytes from client (until `END\n`)
@@ -34,7 +34,7 @@ Terminal states:
 - `CLIENT_DATA_PARTIAL` — Data arrives while buffering (command or D-block)
 - `CLIENT_DATA_COMPLETE` — Complete command (`\n`) or D-block (`END\n`) received
 
-**Agent Events** (from agent-proxy via VS Code commands):
+**Agent Events** (from gpg-bridge-agent via VS Code commands):
 - `AGENT_RESPONSE_COMPLETE` — Complete response from agent received (including initial greeting)
 - `RESPONSE_OK_OR_ERR` — Agent response is OK or ERR (return to READY)
 - `RESPONSE_INQUIRE` — Agent response contains INQUIRE (buffer D-block)
@@ -179,7 +179,7 @@ Each client connection is managed independently:
 **Per-Client Session:**
 1. Client connects → `CLIENT_SOCKET_CONNECTED` → `CONNECTING_TO_AGENT`
 2. Pause socket (prevent data loss during agent connection)
-3. Connect to agent-proxy, receive greeting → `AGENT_RESPONSE_COMPLETE` → `SENDING_TO_CLIENT`
+3. Connect to gpg-bridge-agent, receive greeting → `AGENT_RESPONSE_COMPLETE` → `SENDING_TO_CLIENT`
 4. Write greeting to client socket, detect response type → `RESPONSE_OK_OR_ERR` → `READY`
 5. Resume socket — client can now send commands
 6. Process commands in loop: buffer → send → wait → respond
@@ -197,7 +197,7 @@ The extension exposes one primary function for starting the request proxy:
 
 ### `startRequestProxy`
 
-Creates a Unix socket server and starts proxying GPG requests to agent-proxy.
+Creates a Unix socket server and starts proxying GPG requests to gpg-bridge-agent.
 
 **Signature:**
 ```typescript
@@ -284,22 +284,22 @@ async stop(): Promise<void>
 
 ## VS Code Command Integration
 
-The request proxy communicates with agent-proxy via three VS Code commands:
+The request proxy communicates with gpg-bridge-agent via three VS Code commands:
 
-### `_gpg-agent-proxy.connectAgent`
+### `_gpg-gpg-bridge-agent.connectAgent`
 
 **Called:** When client connects (`CONNECTING_TO_AGENT` state)  
 **Returns:** `{ sessionId: string; greeting: string }`  
 **Purpose:** Establish agent connection; greeting is forwarded to client via the normal `AGENT_RESPONSE_COMPLETE` path
 
-### `_gpg-agent-proxy.sendCommands`
+### `_gpg-gpg-bridge-agent.sendCommands`
 
 **Called:** When complete command or D-block ready (SENDING_TO_AGENT state)  
 **Arguments:** `(sessionId: string, commandBlock: string)`  
 **Returns:** `{ response: string }`  
 **Purpose:** Send command/D-block to agent and get response
 
-### `_gpg-agent-proxy.disconnectAgent`
+### `_gpg-gpg-bridge-agent.disconnectAgent`
 
 **Called:** During cleanup (CLOSING state)  
 **Arguments:** `(sessionId: string)`  
@@ -308,8 +308,8 @@ The request proxy communicates with agent-proxy via three VS Code commands:
 
 **Error Handling:**
 - Command execution errors → ERROR_OCCURRED → CLOSING
-- Network errors propagate from agent-proxy
-- Timeouts handled by agent-proxy (connection 5s, greeting 5s, no response timeout)
+- Network errors propagate from gpg-bridge-agent
+- Timeouts handled by gpg-bridge-agent (connection 5s, greeting 5s, no response timeout)
 
 ## Session Management
 
@@ -378,7 +378,7 @@ Test coverage includes:
 - Buffer management (clearing after extraction, edge cases)
 - Protocol completion detection (OK/ERR/INQUIRE via shared utility)
 
-See [request-proxy/src/test/requestProxy.test.ts](src/test/requestProxy.test.ts) for comprehensive test suite (124 tests).
+See [gpg-bridge-request/src/test/requestProxy.test.ts](src/test/requestProxy.test.ts) for comprehensive test suite (124 tests).
 
 ## Error Handling
 
@@ -451,12 +451,12 @@ Uses shared `cleanupSocket()` utility:
 - **Node.js fs** — Socket file operations, permissions
 - **Node.js child_process** — `gpgconf` execution for socket path detection
 - **Events EventEmitter** — State machine event handling
-- **@gpg-relay/shared** — Protocol utilities (encoding, parsing, response detection, command/D-block extraction, socket cleanup)
-- **VS Code Extension API** — `vscode.commands.executeCommand` for agent-proxy communication
+- **@gpg-bridge/shared** — Protocol utilities (encoding, parsing, response detection, command/D-block extraction, socket cleanup)
+- **VS Code Extension API** — `vscode.commands.executeCommand` for gpg-bridge-agent communication
 
 ## Related
 
-- [agent-proxy/README.md](../agent-proxy/README.md) — Companion extension running on Windows host
+- [gpg-bridge-agent/README.md](../gpg-bridge-agent/README.md) — Companion extension running on Windows host
 - [docs/request-state-machine-refactor.md](../docs/request-state-machine-refactor.md) — Detailed refactor plan and architecture
 - [AGENTS.md](../AGENTS.md) — Project guidelines and state machine pattern documentation
 - [Assuan Protocol](https://www.gnupg.org/documentation/manuals/gnupg/Agent-Protocol.html) - GPG Agent Assuan protocol

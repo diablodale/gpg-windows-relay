@@ -19,7 +19,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { runTests } from '@vscode/test-electron';
-import { GpgCli, assertSafeToDelete } from '@gpg-relay/shared/test/integration';
+import { GpgCli, assertSafeToDelete } from '@gpg-bridge/shared/test/integration';
 
 // Create an isolated keyring directory unique to this run.
 // Validate immediately after creation before touching process.env or GpgCli.

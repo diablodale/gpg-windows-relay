@@ -4,16 +4,16 @@
  */
 
 import * as vscode from 'vscode';
-import type { ICommandExecutor } from '@gpg-relay/shared';
+import type { ICommandExecutor } from '@gpg-bridge/shared';
 
 /**
- * Production implementation that executes VS Code commands to communicate with agent-proxy.
- * These commands are registered in agent-proxy/src/extension.ts.
+ * Production implementation that executes VS Code commands to communicate with gpg-bridge-agent.
+ * These commands are registered in gpg-bridge-agent/src/extension.ts.
  */
 export class VSCodeCommandExecutor implements ICommandExecutor {
     /**
      * Connect to the GPG agent through agent-proxy extension.
-     * Calls `_gpg-agent-proxy.connectAgent` command.
+     * Calls `_gpg-bridge-agent.connectAgent` command.
      *
      * @returns Session ID and agent greeting message
      * @throws Error if command fails or extension not available
@@ -23,14 +23,14 @@ export class VSCodeCommandExecutor implements ICommandExecutor {
         // extension IPC boundary, which bypasses the default-parameter in connectAgent()
         // and causes all sessions to share a null key in the sessions Map.
         return vscode.commands.executeCommand(
-            '_gpg-agent-proxy.connectAgent',
+            '_gpg-bridge-agent.connectAgent',
             ...(sessionId !== undefined ? [sessionId] : [])
         ) as Promise<{ sessionId: string; greeting: string }>;
     }
 
     /**
      * Send Assuan protocol commands to GPG agent through agent-proxy.
-     * Calls `_gpg-agent-proxy.sendCommands` command.
+     * Calls `_gpg-bridge-agent.sendCommands` command.
      *
      * @param sessionId Session ID from connectAgent
      * @param commandBlock Raw Assuan protocol command(s)
@@ -39,7 +39,7 @@ export class VSCodeCommandExecutor implements ICommandExecutor {
      */
     async sendCommands(sessionId: string, commandBlock: string): Promise<{ response: string }> {
         return vscode.commands.executeCommand(
-            '_gpg-agent-proxy.sendCommands',
+            '_gpg-bridge-agent.sendCommands',
             sessionId,
             commandBlock
         ) as Promise<{ response: string }>;
@@ -47,14 +47,14 @@ export class VSCodeCommandExecutor implements ICommandExecutor {
 
     /**
      * Disconnect from GPG agent and clean up session in agent-proxy.
-     * Calls `_gpg-agent-proxy.disconnectAgent` command.
+     * Calls `_gpg-bridge-agent.disconnectAgent` command.
      *
      * @param sessionId Session ID to disconnect
      * @throws Error if command fails
      */
     async disconnectAgent(sessionId: string): Promise<void> {
         await vscode.commands.executeCommand(
-            '_gpg-agent-proxy.disconnectAgent',
+            '_gpg-bridge-agent.disconnectAgent',
             sessionId
         );
     }

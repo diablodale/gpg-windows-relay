@@ -1,11 +1,11 @@
 /**
  * Phase 3 Integration Test Runner
  *
- * Custom @vscode/test-electron runner for request-proxy Phase 3 integration tests.
+ * Custom @vscode/test-electron runner for gpg-bridge-request Phase 3 integration tests.
  *
  * Phase 3 exercises the full proxy chain end-to-end with a real gpg binary on Linux:
- *   gpg (Linux) → Unix socket → request-proxy → VS Code command routing
- *   → agent-proxy (Windows) → gpg-agent (Windows)
+ *   gpg (Linux) → Unix socket → gpg-bridge-request → VS Code command routing
+ *   → gpg-bridge-agent (Windows) → gpg-agent (Windows)
  *
  * Responsibilities:
  *   1. Create an isolated gpg keyring (GNUPGHOME) unique to this test run.
@@ -14,15 +14,15 @@
  *   3. Launch a throwaway gpg-agent pointed at the isolated Windows keyring.
  *   4. Start VS Code via runTests() with --remote so each extension is routed to
  *      the correct host based on its extensionKind declaration:
- *        agent-proxy  (extensionKind: ui)        → Windows local extension host
- *        request-proxy (extensionKind: workspace) → remote (Linux dev container) host
+ *        gpg-bridge-agent  (extensionKind: ui)        → Windows local extension host
+ *        gpg-bridge-request (extensionKind: workspace) → remote (Linux dev container) host
  *   5. After tests complete, kill the agent, delete the key, and delete the keyring.
  *
  * Key differences from Phase 2 (requestProxyRunTest.ts):
  *   - Uses .devcontainer/phase3/devcontainer.json (includes gnupg2 install).
  *   - Exports the public key to a workspace-mounted path so the Phase 3 Mocha
  *     before() can import it into the container's GNUPGHOME via importPublicKey().
- *   - GNUPGHOME in extensionTestsEnv is the Windows path (for agent-proxy);
+ *   - GNUPGHOME in extensionTestsEnv is the Windows path (for gpg-bridge-agent);
  *     the container's GNUPGHOME is a static Linux path set in devcontainer.json remoteEnv.
  *   - PUBKEY_ARMORED_KEY is the ASCII-armored public key string passed via env var.
  *   - extensionTestsPath points to suite/gpgCliIndex (not suite/requestProxyIndex).
@@ -33,7 +33,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as cp from 'child_process';
 import { runTests, downloadAndUnzipVSCode, resolveCliArgsFromVSCodeExecutablePath } from '@vscode/test-electron';
-import { GpgCli, assertSafeToDelete } from '@gpg-relay/shared/test/integration';
+import { GpgCli, assertSafeToDelete } from '@gpg-bridge/shared/test/integration';
 
 // Create an isolated keyring directory unique to this run.
 // Validate immediately after creation before touching process.env or GpgCli.
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
     // with no intermediate file or workspace bind mount path required.
     const pubkeyArmored = await cli.exportPublicKey(fingerprint);
 
-    // Launch the gpg-agent BEFORE the extension hosts start so that agent-proxy's
+    // Launch the gpg-agent BEFORE the extension hosts start so that gpg-bridge-agent's
     // activate() → detectAgentSocket() (calls gpgconf) already sees a live socket.
     await cli.launchAgent();
 
@@ -118,22 +118,22 @@ async function main(): Promise<void> {
         await runTests({
             vscodeExecutablePath,
             extensionDevelopmentPath: [
-                path.join(workspaceRoot, 'agent-proxy'), // agent-proxy root (ui, local)
-                `vscode-remote://dev-container+${REMOTE_CONTAINER_URI}${containerWorkspaceFolder}/request-proxy`, // request-proxy (workspace, remote)
+                path.join(workspaceRoot, 'gpg-bridge-agent'), // gpg-bridge-agent root (ui, local)
+                `vscode-remote://dev-container+${REMOTE_CONTAINER_URI}${containerWorkspaceFolder}/gpg-bridge-request`, // gpg-bridge-request (workspace, remote)
             ],
 
             // Mocha entry point: suite/gpgCliIndex, not suite/requestProxyIndex.
             // gpgCliIndex loads gpgCliIntegration.test.js specifically.
-            extensionTestsPath: `vscode-remote://dev-container+${REMOTE_CONTAINER_URI}${containerWorkspaceFolder}/request-proxy/out/test/integration/suite/gpgCliIndex`,
+            extensionTestsPath: `vscode-remote://dev-container+${REMOTE_CONTAINER_URI}${containerWorkspaceFolder}/gpg-bridge-request/out/test/integration/suite/gpgCliIndex`,
 
             launchArgs: [
                 '--folder-uri',
                 `vscode-remote://dev-container+${REMOTE_CONTAINER_URI}${containerWorkspaceFolder}`,
             ],
 
-            // GNUPGHOME → Windows agent-proxy uses the isolated Windows keyring (same as Phase 2).
+            // GNUPGHOME → Windows gpg-bridge-agent uses the isolated Windows keyring (same as Phase 2).
             // The container's GNUPGHOME is the static Linux path set in devcontainer.json remoteEnv;
-            // it is NOT forwarded here to keep agent-proxy pointed at the Windows keyring.
+            // it is NOT forwarded here to keep gpg-bridge-agent pointed at the Windows keyring.
             // PUBKEY_ARMORED_KEY → ASCII-armored public key string passed directly; no file needed.
             //   devcontainer.json remoteEnv uses ${localEnv:...} to forward it to the container.
             // TEST_KEY_FINGERPRINT → forwarded to container via devcontainer.json remoteEnv.

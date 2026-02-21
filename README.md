@@ -1,4 +1,4 @@
-﻿# GPG Agent/Request Proxy for VS Code
+# GPG Agent/Request Proxy for VS Code
 
 Proxies GPG agent protocols between Linux remotes (WSL, Dev Containers, SSH) and
 Windows host running [Gpg4win](https://www.gpg4win.org/) using an **extension pack architecture**.
@@ -38,8 +38,8 @@ from the remote to the GPG agent running on your VS Code UI host.
 
 3. Install `.vsix` files:
 
-   - On GPG agent host install `agent-proxy/gpg-agent-proxy-*.vsix`
-   - On remote requester install `request-proxy/gpg-request-proxy-*.vsix`
+   - On GPG agent host install `gpg-bridge-agent/gpg-bridge-agent-*.vsix`
+   - On remote requester install `gpg-bridge-request/gpg-bridge-request-*.vsix`
    - Or install the pack which includes both
 
 ## Usage
@@ -47,13 +47,13 @@ from the remote to the GPG agent running on your VS Code UI host.
 ### Configuration
 
 Often the default configuration works. You can override it with
-VS Code settings for "GPG Agent Proxy" having prefix `gpgAgentProxy`:
+VS Code settings for "GPG Bridge Agent" having prefix `gpgBridgeAgent`:
 
 ```json
 {
-  "gpgAgentProxy.gpg4winPath": "C:\\Program Files\\GnuPG\\bin",
-  "gpgAgentProxy.debugLogging": false,
-  "gpgRequestProxy.debugLogging": false
+  "gpgBridgeAgent.gpg4winPath": "C:\\Program Files\\GnuPG\\bin",
+  "gpgBridgeAgent.debugLogging": false,
+  "gpgBridgeRequest.debugLogging": false
 }
 ```
 
@@ -61,22 +61,22 @@ VS Code settings for "GPG Agent Proxy" having prefix `gpgAgentProxy`:
 
 **On Windows host:**
 
-- **GPG Agent Proxy: Start** - Start the agent proxy
-- **GPG Agent Proxy: Stop** - Stop the agent proxy
-- **GPG Agent Proxy: Restart** - Restart the agent proxy
-- **GPG Agent Proxy: Show Status** - Display agent proxy status
+- **GPG Bridge Agent: Start** - Start the agent proxy
+- **GPG Bridge Agent: Stop** - Stop the agent proxy
+- **GPG Bridge Agent: Restart** - Restart the agent proxy
+- **GPG Bridge Agent: Show Status** - Display agent proxy status
 
 **On Remote:**
 
-- **GPG Request Proxy: Start** - Start the request proxy
-- **GPG Request Proxy: Stop** - Stop the request proxy
+- **GPG Bridge Request: Start** - Start the request proxy
+- **GPG Bridge Request: Stop** - Stop the request proxy
 
 ### Typical Workflow
 
 1. Open VS Code on Windows
-2. Agent proxy extension auto-starts (or run **GPG Agent Proxy: Start**)
+2. Agent proxy extension auto-starts (or run **GPG Bridge Agent: Start**)
 3. Connect to WSL/Container/SSH remote
-4. Request proxy auto-starts (or run **GPG Request Proxy: Start**)
+4. Request proxy auto-starts (or run **GPG Bridge Request: Start**)
 5. GPG operations in the remote now work with your Windows keys
 
 ## Architecture
@@ -87,14 +87,14 @@ This project uses a **monorepo structure** with three separate extensions:
 
 ```text
  .
- agent-proxy/       # Agent proxy
- request-proxy/     # Remote request proxy (WSL/Container/SSH)
+ gpg-bridge-agent/       # Agent proxy
+ gpg-bridge-request/     # Remote request proxy (WSL/Container/SSH)
  pack/              # Extension pack (installs both)
 ```
 
-#### 1. Agent Proxy Extension (`agent-proxy/`)
+#### 1. Agent Proxy Extension (`gpg-bridge-agent/`)
 
-- **Name:** `gpg-agent-proxy`
+- **Name:** `gpg-bridge-agent`
 - **Runs on:** Windows only (`"os": ["win32"]`)
 - **Context:** UI context only
 - **Activation:** Auto-starts on VS Code launch
@@ -102,12 +102,12 @@ This project uses a **monorepo structure** with three separate extensions:
 
 **Files:**
 
-- `agent-proxy/src/extension.ts` - Main extension
-- `agent-proxy/src/services/agentProxy.ts` - Agent proxy implementation
+- `gpg-bridge-agent/src/extension.ts` - Main extension
+- `gpg-bridge-agent/src/services/agentProxy.ts` - Agent proxy implementation
 
-#### 2. Request Proxy Extension (`request-proxy/`)
+#### 2. Request Proxy Extension (`gpg-bridge-request/`)
 
-- **Name:** `gpg-request-proxy`
+- **Name:** `gpg-bridge-request`
 - **Runs on:** WSL, Dev Containers, SSH (any non-Windows remote)
 - **Context:** Workspace context only
 - **Activation:** Auto-starts when connecting to remote
@@ -115,12 +115,12 @@ This project uses a **monorepo structure** with three separate extensions:
 
 **Files:**
 
-- `request-proxy/src/extension.ts` - Remote extension
-- `request-proxy/src/services/requestProxy.ts` - Request proxy service (unified for all remote types)
+- `gpg-bridge-request/src/extension.ts` - Remote extension
+- `gpg-bridge-request/src/services/requestProxy.ts` - Request proxy service (unified for all remote types)
 
 #### 3. Pack Extension (`pack/`)
 
-- **Name:** `gpg-agent-proxy`
+- **Name:** `gpg-bridge-agent`
 - **Type:** Extension pack (no code)
 - **Responsibility:** Bundles agent proxy and request proxy extensions
 
@@ -137,14 +137,14 @@ This project uses a **monorepo structure** with three separate extensions:
 Windows Host
  Gpg4win agent (Assuan socket on localhost)
   
- Agent Proxy Extension (gpg-agent-proxy)
+ Agent Proxy Extension (gpg-bridge-agent)
    Reads: C:\Users\<user>\AppData\Local\gnupg\<unique>\S.gpg-agent.extra
    Extracts: TCP port xxxx + 16-byte nonce
    Connects to localhost:xxxx
    Proxies data to localhost:63331
   
 Remote Environment (WSL/Container/SSH)
- Request Proxy Extension (gpg-request-proxy)
+ Request Proxy Extension (gpg-bridge-request)
    Creates Unix socket: /run/user/1000/gnupg/S.gpg-agent.extra
    Connects to: localhost:63331 (via VS Code tunnel)
    Pipes bidirectionally
@@ -201,14 +201,14 @@ Immediate disconnect if either side closes
 
 ```text
  .
- agent-proxy/
+ gpg-bridge-agent/
     src/
        extension.ts           # Windows UI context
        services/
            agentProxy.ts      # Agent proxy service
     package.json
     tsconfig.json
- request-proxy/
+ gpg-bridge-request/
     src/
        extension.ts           # Remote workspace context
        services/
@@ -226,7 +226,7 @@ Immediate disconnect if either side closes
 
 ## Shared Utilities
 
-The `shared/` folder contains reusable code packaged as `@gpg-relay/shared` for both extensions:
+The `shared/` folder contains reusable code packaged as `@gpg-bridge/shared` for both extensions:
 
 - **protocol.ts**: Pure functions for Assuan protocol parsing (latin1 encoding, error handling, command extraction)
 - **types.ts**: Shared type definitions and dependency injection interfaces
@@ -306,7 +306,7 @@ For detailed test architecture, see [Refactoring Plan - Phase 6](../docs/refacto
 1. **Install both extensions** (or the pack)
 
 2. **Start the agent proxy:**
-   - Press F1  "GPG Agent Proxy: Start"
+   - Press F1  "GPG Bridge Agent: Start"
    - Check output channel for "Agent proxy started on localhost:63331"
 
 3. **Connect to remote:**
@@ -324,7 +324,7 @@ For detailed test architecture, see [Refactoring Plan - Phase 6](../docs/refacto
 
 5. **Stop:**
 
-   - Press F1  "GPG Agent Proxy: Stop"
+   - Press F1  "GPG Bridge Agent: Stop"
 
 ### Debug Output
 
@@ -332,15 +332,15 @@ Enable in VS Code settings:
 
 ```json
 {
-  "gpgAgentProxy.debugLogging": true,
-  "gpgRequestProxy.debugLogging": true
+  "gpgBridgeAgent.debugLogging": true,
+  "gpgBridgeRequest.debugLogging": true
 }
 ```
 
 Check output channels:
 
-- **GPG Agent Proxy** (gpg agent host)
-- **GPG Request Proxy** (remote)
+- **GPG Bridge Agent** (gpg agent host)
+- **GPG Bridge Request** (remote)
 
 ## Status
 
@@ -378,6 +378,6 @@ For guidance on editing, see:
 - [Architecture](#architecture) - How it works and architecture
 - [.github/copilot-instructions.md](../.github/copilot-instructions.md) - Full development guidelines
 - [Refactoring Plan](../docs/refactoring-plan.md) - Architecture decisions and test strategy
-- `agent-proxy/src/services/agentProxy.ts` - Assuan protocol details
-- `request-proxy/src/services/requestProxy.ts` - Proxy state machine
+- `gpg-bridge-agent/src/services/agentProxy.ts` - Assuan protocol details
+- `gpg-bridge-request/src/services/requestProxy.ts` - Proxy state machine
 - `shared/src/protocol.ts` - Pure protocol functions (100% testable)

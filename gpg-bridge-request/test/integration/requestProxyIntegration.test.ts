@@ -18,7 +18,7 @@
  *     remoteEnv ${localEnv:...} substitution (injected from extensionTestsEnv via VS Code process
  *     env); required by test 5 — PKSIGN sign flow; missing value fails the before() hook
  *
- * Socket path discovery: the '_gpg-request-proxy.test.getSocketPath' VS Code command
+ * Socket path discovery: the '_gpg-bridge-request.test.getSocketPath' VS Code command
  * returns the active socket path. It is only registered when VSCODE_INTEGRATION_TEST=1.
  */
 
@@ -26,7 +26,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { expect } from 'chai';
-import { AssuanSocketClient } from '@gpg-relay/shared/test/integration';
+import { AssuanSocketClient } from '@gpg-bridge/shared/test/integration';
 
 // ---------------------------------------------------------------------------
 // Suite
@@ -47,7 +47,7 @@ describe('Phase 2 — request-proxy → agent-proxy → Real gpg-agent', functio
         while (Date.now() < deadline) {
             try {
                 path = await vscode.commands.executeCommand<string | null>(
-                    '_gpg-request-proxy.test.getSocketPath'
+                    '_gpg-bridge-request.test.getSocketPath'
                 );
                 break; // command found — proxy may have returned null if it failed to start
             } catch {
@@ -57,14 +57,14 @@ describe('Phase 2 — request-proxy → agent-proxy → Real gpg-agent', functio
         }
         if (path === undefined) {
             throw new Error(
-                '_gpg-request-proxy.test.getSocketPath not registered after 30 s. ' +
+                '_gpg-bridge-request.test.getSocketPath not registered after 30 s. ' +
                 'Verify VSCODE_INTEGRATION_TEST=1 in the container env and that ' +
                 'request-proxy extension is loading in the remote extension host.'
             );
         }
         if (!path) {
             throw new Error(
-                '_gpg-request-proxy.test.getSocketPath returned null. ' +
+                '_gpg-bridge-request.test.getSocketPath returned null. ' +
                 'Check that request-proxy started without errors (VSCODE_INTEGRATION_TEST must be 1).'
             );
         }
@@ -83,7 +83,7 @@ describe('Phase 2 — request-proxy → agent-proxy → Real gpg-agent', functio
         // Reset extension state so subsequent test runs start clean.
         // No-op if test 8 already stopped the proxy.
         try {
-            await vscode.commands.executeCommand('gpg-request-proxy.stop');
+            await vscode.commands.executeCommand('gpg-bridge-request.stop');
         } catch { /* ignore */ }
     });
 
@@ -267,13 +267,13 @@ describe('Phase 2 — request-proxy → agent-proxy → Real gpg-agent', functio
     // 8. stop() cleans up — socket file removed after proxy stops
     //
     // This test STOPS the proxy. It must run last. The after() hook calls
-    // gpg-request-proxy.stop as a no-op safety net.
+    // gpg-bridge-request.stop as a no-op safety net.
     // -----------------------------------------------------------------------
     it('8. stop() removes the socket file', async function () {
         // Confirm socket exists before stop
         expect(fs.existsSync(socketPath), 'socket should exist before stop').to.be.true;
 
-        await vscode.commands.executeCommand('gpg-request-proxy.stop');
+        await vscode.commands.executeCommand('gpg-bridge-request.stop');
 
         // Socket file should be removed by stop()
         expect(fs.existsSync(socketPath), 'socket file should be removed after stop').to.be.false;

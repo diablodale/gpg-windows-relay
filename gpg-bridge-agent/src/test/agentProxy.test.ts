@@ -7,7 +7,7 @@
 
 import { expect } from 'chai';
 import { AgentProxy } from '../services/agentProxy';
-import { MockSocketFactory, MockFileSystem, MockLogConfig } from '@gpg-relay/shared/test';
+import { MockSocketFactory, MockFileSystem, MockLogConfig } from '@gpg-bridge/shared/test';
 
 describe('AgentProxy', () => {
     let mockLogConfig: MockLogConfig;

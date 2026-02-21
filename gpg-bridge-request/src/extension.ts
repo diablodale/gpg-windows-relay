@@ -13,25 +13,25 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { RequestProxy } from './services/requestProxy';
-import { extractErrorMessage } from '@gpg-relay/shared';
+import { extractErrorMessage } from '@gpg-bridge/shared';
 import { VSCodeCommandExecutor } from './services/commandExecutor';
-import { isTestEnvironment, isIntegrationTestEnvironment } from '@gpg-relay/shared';
+import { isTestEnvironment, isIntegrationTestEnvironment } from '@gpg-bridge/shared';
 
 let requestProxyService: RequestProxy | null = null;
 let outputChannel: vscode.OutputChannel;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    outputChannel = vscode.window.createOutputChannel('GPG Request Proxy');
+    outputChannel = vscode.window.createOutputChannel('GPG Bridge Request');
 
     try {
         outputChannel.appendLine(`Remote context (${vscode.env.remoteName}) activated`);
 
         // Register commands
         context.subscriptions.push(
-            vscode.commands.registerCommand('gpg-request-proxy.start', async () => {
+            vscode.commands.registerCommand('gpg-bridge-request.start', async () => {
                 await startRequestProxy();
             }),
-            vscode.commands.registerCommand('gpg-request-proxy.stop', async () => {
+            vscode.commands.registerCommand('gpg-bridge-request.stop', async () => {
                 await stopRequestProxy();
             }),
             outputChannel
@@ -44,7 +44,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // this command is not needed and must not be registered.
         if (isIntegrationTestEnvironment() && !process.env.GNUPGHOME) {
             context.subscriptions.push(
-                vscode.commands.registerCommand('_gpg-request-proxy.test.getSocketPath', () => {
+                vscode.commands.registerCommand('_gpg-bridge-request.test.getSocketPath', () => {
                     return requestProxyService?.getSocketPath() ?? null;
                 })
             );
@@ -78,7 +78,7 @@ async function startRequestProxy(): Promise<void> {
         outputChannel.appendLine('Starting request proxy...');
 
         // Create a log callback that respects the debugLogging setting
-        const config = vscode.workspace.getConfiguration('gpgRequestProxy');
+        const config = vscode.workspace.getConfiguration('gpgBridgeRequest');
         const debugLogging = config.get<boolean>('debugLogging') || true;   // TODO remove forced debug logging
         const logCallback = debugLogging ? (message: string) => outputChannel.appendLine(message) : undefined;
 

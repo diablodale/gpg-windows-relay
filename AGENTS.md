@@ -2,14 +2,14 @@
 
 This workspace contains two cooperating VS Code extensions written in TypeScript:
 
-- `agent-proxy` — manages authenticated connections to a local GPG agent (Windows: TCP via socket file nonce).
-- `request-proxy` — provides a local Unix socket server that forwards Assuan protocol requests to `agent-proxy`.
+- `gpg-bridge-agent` — manages authenticated connections to a local GPG agent (Windows: TCP via socket file nonce).
+- `gpg-bridge-request` — provides a local Unix socket server that forwards Assuan protocol requests to `gpg-bridge-agent`.
 
 ## Code Style
 
 - Language: TypeScript. Configuration is in `tsconfig.json`.
 - Linting / formatting: follow existing patterns in `eslint.config.mjs` and existing code (no extra formatting rules enforced here).
-- Logging: use the module-level `log(config, message)` helper pattern (see `agent-proxy/src/services/agentProxy.ts` and `request-proxy/src/services/requestProxy.ts`). Do not log raw binary data.
+- Logging: use the module-level `log(config, message)` helper pattern (see `gpg-bridge-agent/src/services/agentProxy.ts` and `gpg-bridge-request/src/services/requestProxy.ts`). Do not log raw binary data.
 
 ## Source Control
 
@@ -37,18 +37,18 @@ When a logically complete units of work or significant change is made, follow th
 
 ## Architecture
 
-- Two small extensions communicate over VS Code commands: `_gpg-agent-proxy.connectAgent`, `_gpg-agent-proxy.sendCommands`, and `_gpg-agent-proxy.disconnectAgent` (see `agent-proxy/src/extension.ts`).
-- `request-proxy` listens on the local GPG Unix socket and acts as a bridge between the calling GPG process and `agent-proxy`.
-- `agent-proxy` handles the Assuan/GPG protocol specifics, including nonce authentication and session lifecycle.
-- Shared code is packaged as `@gpg-relay/shared` npm package (`file:../shared` dependency) for clean imports and testability.
-  Import this with `from '@gpg-relay/shared'` or `from '@gpg-relay/shared/test'`.
+- Two small extensions communicate over VS Code commands: `_gpg-bridge-agent.connectAgent`, `_gpg-bridge-agent.sendCommands`, and `_gpg-bridge-agent.disconnectAgent` (see `gpg-bridge-agent/src/extension.ts`).
+- `gpg-bridge-request` listens on the local GPG Unix socket and acts as a bridge between the calling GPG process and `gpg-bridge-agent`.
+- `gpg-bridge-agent` handles the Assuan/GPG protocol specifics, including nonce authentication and session lifecycle.
+- Shared code is packaged as `@gpg-bridge/shared` npm package (`file:../shared` dependency) for clean imports and testability.
+  Import this with `from '@gpg-bridge/shared'` or `from '@gpg-bridge/shared/test'`.
 
 Key files:
 
-- [agent-proxy/src/services/agentProxy.ts](../agent-proxy/src/services/agentProxy.ts)
-- [agent-proxy/src/extension.ts](../agent-proxy/src/extension.ts)
-- [request-proxy/src/services/requestProxy.ts](../request-proxy/src/services/requestProxy.ts)
-- [request-proxy/src/extension.ts](../request-proxy/src/extension.ts)
+- [gpg-bridge-agent/src/services/agentProxy.ts](../gpg-bridge-agent/src/services/agentProxy.ts)
+- [gpg-bridge-agent/src/extension.ts](../gpg-bridge-agent/src/extension.ts)
+- [gpg-bridge-request/src/services/requestProxy.ts](../gpg-bridge-request/src/services/requestProxy.ts)
+- [gpg-bridge-request/src/extension.ts](../gpg-bridge-request/src/extension.ts)
 - [shared/src/protocol.ts](../shared/src/protocol.ts) (shared utilities for Assuan/GPG protocol, latin1 encoding, error handling, command extraction)
 - [shared/src/types.ts](../shared/src/types.ts) (shared types for logging, sanitization, dependency injection)
 - [shared/src/test/helpers.ts](../shared/src/test/helpers.ts) (shared mock implementations for testing with dependency injection)
@@ -169,7 +169,7 @@ This pattern provides:
 Run `npm test` or `npm run test:watch`. Framework: Mocha (BDD) + Chai (expect). When adding tests:
 * write unit tests for pure functions in `shared/src/test/`
 * integration tests in `<extension>/src/test/`
-* use mocks from `@gpg-relay/shared/test` for socket/file/command interactions
+* use mocks from `@gpg-bridge/shared/test` for socket/file/command interactions
 * target >70% coverage via dependency injection
 
 ## Dependency Injection
@@ -194,7 +194,7 @@ Use Powershell on Windows hosts. Use bash on Linux/macOS hosts. From repository 
 - **`npm run watch`** — runs watch mode in all folders simultaneously (rebuilds on file change)
 - **`npm run package`** — creates packaged extension (.vsix files)
 
-Each extension compiles to its own `out/` folder via TypeScript, and shared code is packaged as `@gpg-relay/shared` npm module imported with `file:../shared` dependencies.
+Each extension compiles to its own `out/` folder via TypeScript, and shared code is packaged as `@gpg-bridge/shared` npm module imported with `file:../shared` dependencies.
 
 ## Project Conventions
 
@@ -206,7 +206,7 @@ Each extension compiles to its own `out/` folder via TypeScript, and shared code
 ## Integration Points
 
 - GPG agent: uses Assuan protocol via a socket file (Windows uses a socket file containing host/port + nonce). The code parses the socket file and authenticates by sending the nonce.
-- Cross-extension calls: `request-proxy` and `agent-proxy` communicate using `vscode.commands.executeCommand(...)` — keep argument shapes stable.
+- Cross-extension calls: `gpg-bridge-request` and `gpg-bridge-agent` communicate using `vscode.commands.executeCommand(...)` — keep argument shapes stable.
 
 ## Security
 
@@ -219,7 +219,7 @@ Each extension compiles to its own `out/` folder via TypeScript, and shared code
 
 **Code**: Reference key files in Architecture section. Run `npm run compile` to build, `npm run watch` during development, `npm run package` to validate packaging. Update both extensions if changing public commands.
 
-**Shared code**: Add utilities to `shared/src/` (pure functions in protocol.ts, types in types.ts), re-export from index.ts, import via `@gpg-relay/shared`.
+**Shared code**: Add utilities to `shared/src/` (pure functions in protocol.ts, types in types.ts), re-export from index.ts, import via `@gpg-bridge/shared`.
 
 **Testing**: Write unit tests in shared/src/test/ for pure functions, integration tests in <extension>/src/test/ for services. Add `*Deps` interfaces for DI with pattern `constructor(config: Config, deps?: Partial<Deps>)`. Run `npm test` before committing. Target >70% coverage.
 

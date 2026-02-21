@@ -3,17 +3,17 @@
     // (npm run test:integration:gpg-cli via gpgCliRunTest.ts, which passes configFile pointing here).
     // Also available in the VS Code manual container picker.
     //
-    // Phase 3: gpg CLI in this container calls through request-proxy (workspace extension here)
-    //   → VS Code commands → agent-proxy (Windows) → gpg-agent (Windows).
-    //   The full chain: gpg → Unix socket → request-proxy → VS Code commands
-    //   → agent-proxy (Windows) → gpg-agent (Windows).
+    // Phase 3: gpg CLI in this container calls through gpg-bridge-request (workspace extension here)
+    //   → VS Code commands → gpg-bridge-agent (Windows) → gpg-agent (Windows).
+    //   The full chain: gpg → Unix socket → gpg-bridge-request → VS Code commands
+    //   → gpg-bridge-agent (Windows) → gpg-agent (Windows).
     //
     // gpg2 (gnupg2) must be installed — test cases call the gpg binary directly.
     // GNUPGHOME is a static Linux path; the ASCII-armored public key for the Windows test
     // key is passed directly via PUBKEY_ARMORED_KEY env var (no file needed).
     //
     // See docs/integration-test-plan.md for details.
-    "name": "gpg-windows-relay phase 3 integration tests",
+    "name": "gpg-bridge phase 3 integration tests",
     "image": "mcr.microsoft.com/devcontainers/javascript-node:22-trixie",
     // remoteEnv is evaluated at attach time, not container creation.
     // ${localEnv:VAR} reads from the local VS Code process env — which is the
@@ -22,7 +22,7 @@
     //
     // VSCODE_INTEGRATION_TEST: static flag — must be 1 for full extension init.
     // GNUPGHOME: static Linux path for the gpg CLI and GpgCli in the container.
-    //   Distinct from Windows GNUPGHOME (which agent-proxy reads from extensionTestsEnv).
+    //   Distinct from Windows GNUPGHOME (which gpg-bridge-agent reads from extensionTestsEnv).
     // TEST_KEY_FINGERPRINT / PUBKEY_ARMORED_KEY: dynamic per run — generated in
     //   gpgCliRunTest.ts, injected into VS Code via extensionTestsEnv, resolved here
     //   via ${localEnv:...}.
@@ -37,25 +37,25 @@
     // Windows-host node_modules (which use Windows junction paths). Use phase3-specific
     // volume names to avoid conflicts with phase2 volumes if both containers are present.
     "mounts": [
-        { "source": "gpg-relay-p3-root-node-modules",    "target": "${containerWorkspaceFolder}/node_modules",               "type": "volume" },
-        { "source": "gpg-relay-p3-shared-node-modules",  "target": "${containerWorkspaceFolder}/shared/node_modules",         "type": "volume" },
-        { "source": "gpg-relay-p3-request-node-modules", "target": "${containerWorkspaceFolder}/request-proxy/node_modules",  "type": "volume" },
-        { "source": "gpg-relay-p3-agent-node-modules",   "target": "${containerWorkspaceFolder}/agent-proxy/node_modules",    "type": "volume" }
+        { "source": "gpg-bridge-p3-root-node-modules",    "target": "${containerWorkspaceFolder}/node_modules",                    "type": "volume" },
+        { "source": "gpg-bridge-p3-shared-node-modules",  "target": "${containerWorkspaceFolder}/shared/node_modules",              "type": "volume" },
+        { "source": "gpg-bridge-p3-request-node-modules", "target": "${containerWorkspaceFolder}/gpg-bridge-request/node_modules",  "type": "volume" },
+        { "source": "gpg-bridge-p3-agent-node-modules",   "target": "${containerWorkspaceFolder}/gpg-bridge-agent/node_modules",    "type": "volume" }
     ],
     // gnupg2 is pre-installed in the base image.
-    // Only install shared and request-proxy npm packages — agent-proxy has "os": ["win32"] and
+    // Only install shared and gpg-bridge-request npm packages — gpg-bridge-agent has "os": ["win32"] and
     // npm install would fail with EBADPLATFORM on Linux, aborting the whole chain.
     // updateContentCommand runs before VS Code connects (waitFor defaults to updateContentCommand),
     // so mocha and all npm packages are installed before the extension host loads.
     // postCreateCommand runs AFTER the tool connects — wrong place for npm install.
-    "updateContentCommand": "sudo chown node:node ${containerWorkspaceFolder}/node_modules ${containerWorkspaceFolder}/shared/node_modules ${containerWorkspaceFolder}/request-proxy/node_modules ${containerWorkspaceFolder}/agent-proxy/node_modules && cd ${containerWorkspaceFolder}/shared && npm install && cd ${containerWorkspaceFolder}/request-proxy && npm install",
+    "updateContentCommand": "sudo chown node:node ${containerWorkspaceFolder}/node_modules ${containerWorkspaceFolder}/shared/node_modules ${containerWorkspaceFolder}/gpg-bridge-request/node_modules ${containerWorkspaceFolder}/gpg-bridge-agent/node_modules && cd ${containerWorkspaceFolder}/shared && npm install && cd ${containerWorkspaceFolder}/gpg-bridge-request && npm install",
     "customizations": {
         "vscode": {
             "extensions": [
                 // Both extensions are loaded as development extensions by the test runner;
                 // no marketplace install is needed. Listed here for documentation.
-                // "local.gpg-agent-proxy",   // loads on Windows (extensionKind: ui)
-                // "local.gpg-request-proxy"  // loads here in container (extensionKind: workspace)
+                // "local.gpg-bridge-agent",   // loads on Windows (extensionKind: ui)
+                // "local.gpg-bridge-request"  // loads here in container (extensionKind: workspace)
             ]
         }
     }

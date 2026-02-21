@@ -1,6 +1,6 @@
-# GPG Agent Proxy Extension
+# GPG Bridge Agent Extension
 
-VS Code extension that manages authenticated connections to a Windows GPG agent. Runs on the Windows host and exposes commands for the `request-proxy` extension to connect, send commands, and disconnect from the GPG agent.
+VS Code extension that manages authenticated connections to a Windows GPG agent. Runs on the Windows host and exposes commands for the `gpg-bridge-request` extension to connect, send commands, and disconnect from the GPG agent.
 
 ## Architecture
 
@@ -26,7 +26,7 @@ Terminal states:
 
 #### Events (10 Total)
 
-**Client Events** (from request-proxy):
+**Client Events** (from gpg-bridge-request):
 - `CLIENT_CONNECT_REQUESTED` — connectAgent() called
 - `CLIENT_DATA_RECEIVED` — Data received (nonce Buffer or command string)
 
@@ -138,13 +138,13 @@ GPG operations often require human interaction through pinentry (password prompt
 The `sendCommands()` public API validates session is in READY state **before** emitting `CLIENT_DATA_RECEIVED`:
 - If not READY, emits `ERROR_OCCURRED` and rejects the promise
 - Additional race condition check in `handleReady` if state changed between validation and handler execution
-- Similar to request-proxy's protocol violation detection for client data in invalid states
+- Similar to gpg-bridge-request's protocol violation detection for client data in invalid states
 
 ## Public API
 
 The extension exposes three VS Code commands for the request-proxy:
 
-### `_gpg-agent-proxy.connectAgent`
+### `_gpg-bridge-agent.connectAgent`
 
 Creates a new session and connects to the GPG agent.
 
@@ -164,7 +164,7 @@ Creates a new session and connects to the GPG agent.
 - Connection: 5 seconds
 - Greeting: 5 seconds
 
-### `_gpg-agent-proxy.sendCommands`
+### `_gpg-bridge-agent.sendCommands`
 
 Sends a command block to the GPG agent and returns the response.
 
@@ -183,7 +183,7 @@ Sends a command block to the GPG agent and returns the response.
 
 **Timeouts:** None (supports interactive operations)
 
-### `_gpg-agent-proxy.disconnectAgent`
+### `_gpg-bridge-agent.disconnectAgent`
 
 Disconnects from the GPG agent and cleans up the session.
 
@@ -257,7 +257,7 @@ Test coverage includes:
 - Concurrent command prevention
 - Interactive operation support (no response timeout)
 
-See [agent-proxy/src/test/agentProxy.test.ts](src/test/agentProxy.test.ts) for comprehensive test suite.
+See [gpg-bridge-agent/src/test/agentProxy.test.ts](src/test/agentProxy.test.ts) for comprehensive test suite.
 
 ## Error Handling
 
@@ -286,11 +286,11 @@ Cleanup continues even if one step fails (e.g., `removeAllListeners()` throws). 
 - **Node.js fs** — Socket file parsing
 - **Events EventEmitter** — State machine event handling
 - **uuid** — Session ID generation
-- **@gpg-relay/shared** — Protocol utilities (decoding, parsing, response detection, socket cleanup)
+- **@gpg-bridge/shared** — Protocol utilities (decoding, parsing, response detection, socket cleanup)
 
 ## Related
 
-- [request-proxy/README.md](../request-proxy/README.md) — Companion extension running on remote
+- [request-proxy/README.md](../gpg-bridge-request/README.md) — Companion extension running on remote
 - [docs/agent-state-machine-refactor.md](../docs/agent-state-machine-refactor.md) — Detailed refactor plan and architecture
 - [AGENTS.md](../AGENTS.md) — Project guidelines and state machine pattern documentation
 - [Assuan Protocol](https://www.gnupg.org/documentation/manuals/gnupg/Agent-Protocol.html) - GPG Agent Assuan protocol

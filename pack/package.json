@@ -1,6 +1,6 @@
 {
-  "name": "gpg-windows-relay",
-  "displayName": "GPG Windows Relay",
+  "name": "gpg-bridge",
+  "displayName": "GPG Bridge",
   "description": "Relays remote GPG protocols to Windows host running Gpg4win",
   "version": "0.0.1",
   "preview": true,
@@ -8,11 +8,11 @@
   "license": "See LICENSE file",
   "repository": {
     "type": "git",
-    "url": "https://github.com/diablodale/gpg-windows-relay"
+    "url": "https://github.com/diablodale/gpg-bridge"
   },
   "qna": false,
   "bugs": {
-    "url": "https://github.com/diablodale/gpg-windows-relay/issues"
+    "url": "https://github.com/diablodale/gpg-bridge/issues"
   },
   "engines": {
     "vscode": "^1.108.1"
@@ -21,8 +21,8 @@
     "Extension Packs"
   ],
   "extensionPack": [
-    "local.gpg-agent-proxy",
-    "local.gpg-request-proxy"
+    "local.gpg-bridge-agent",
+    "local.gpg-bridge-request"
   ],
   "scripts": {
     "package": "vsce package"

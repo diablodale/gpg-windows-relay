@@ -1,11 +1,11 @@
 /**
  * Phase 2 Integration Test Runner
  *
- * Custom @vscode/test-electron runner for request-proxy Phase 2 integration tests.
+ * Custom @vscode/test-electron runner for gpg-bridge-request Phase 2 integration tests.
  *
  * Phase 2 exercises the full proxy chain on a Windows host:
- *   AssuanSocketClient → Unix socket (Linux) → request-proxy → VS Code command routing
- *   → agent-proxy (Windows) → gpg-agent (Windows)
+ *   AssuanSocketClient → Unix socket (Linux) → gpg-bridge-request → VS Code command routing
+ *   → gpg-bridge-agent (Windows) → gpg-agent (Windows)
  *
  * Responsibilities:
  *   1. Create an isolated gpg keyring (GNUPGHOME) unique to this test run.
@@ -15,8 +15,8 @@
  *   3. Launch a throwaway gpg-agent pointed at the isolated keyring.
  *   4. Start VS Code via runTests() with --remote so each extension is routed to
  *      the correct host based on its extensionKind declaration:
- *        agent-proxy  (extensionKind: ui)        → Windows local extension host
- *        request-proxy (extensionKind: workspace) → remote (Linux dev container) host
+ *        gpg-bridge-agent  (extensionKind: ui)        → Windows local extension host
+ *        gpg-bridge-request (extensionKind: workspace) → remote (Linux dev container) host
  *   5. After tests complete, kill the agent, delete the key, and delete the keyring.
  *
  * ─────────────────────────────────────────────────────────────────────────────
@@ -28,7 +28,7 @@
  *    The remote container extension host is a separate Linux process that inherits its env
  *    from the container, NOT from the Windows process.
  *    Consequence:
- *      - GNUPGHOME                    → reaches agent-proxy (Windows local host) ✓
+ *      - GNUPGHOME                    → reaches gpg-bridge-agent (Windows local host) ✓
  *      - VSCODE_INTEGRATION_TEST      → set via devcontainer.json remoteEnv (static "1") ✓
  *      - TEST_KEY_FINGERPRINT/KEYGRIP → in VS Code process env via extensionTestsEnv;
  *        devcontainer.json remoteEnv ${localEnv:...} picks them up at attach time ✓
@@ -69,7 +69,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as cp from 'child_process';
 import { runTests, downloadAndUnzipVSCode, resolveCliArgsFromVSCodeExecutablePath } from '@vscode/test-electron';
-import { GpgCli, assertSafeToDelete } from '@gpg-relay/shared/test/integration';
+import { GpgCli, assertSafeToDelete } from '@gpg-bridge/shared/test/integration';
 
 // Create an isolated keyring directory unique to this run.
 // Validate immediately after creation before touching process.env or GpgCli.
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
     const fingerprint = await cli.getFingerprint('integration-test@example.com');
     const keygrip = await cli.getKeygrip('integration-test@example.com');
 
-    // Launch the gpg-agent BEFORE the extension hosts start so that agent-proxy's
+    // Launch the gpg-agent BEFORE the extension hosts start so that gpg-bridge-agent's
     // activate() → detectAgentSocket() (calls gpgconf) already sees a live socket.
     await cli.launchAgent();
 
@@ -169,26 +169,26 @@ async function main(): Promise<void> {
             vscodeExecutablePath,
             // Both extensions as development extensions.
             // VS Code routes each to the correct host by extensionKind:
-            //   agent-proxy  (extensionKind: ui)        → Windows local extension host
-            //   request-proxy (extensionKind: workspace) → remote (Linux) extension host
+            //   gpg-bridge-agent  (extensionKind: ui)        → Windows local extension host
+            //   gpg-bridge-request (extensionKind: workspace) → remote (Linux) extension host
             //
             // VS Code cannot translate Windows extensionDevelopmentPath to container paths
             // automatically — workspace-kind extensions with Windows paths are silently
             // dropped (not loaded anywhere). Fix: pass the remote vscode-remote:// URI
-            // for request-proxy directly so VS Code routes it to the remote ext host.
+            // for gpg-bridge-request directly so VS Code routes it to the remote ext host.
             //
-            // agent-proxy: local Windows path is correct (extensionKind: ui, stays local).
-            // request-proxy: remote URI — VS Code loads it in the remote ext host.
+            // gpg-bridge-agent: local Windows path is correct (extensionKind: ui, stays local).
+            // gpg-bridge-request: remote URI — VS Code loads it in the remote ext host.
             extensionDevelopmentPath: [
-                path.join(workspaceRoot, 'agent-proxy'), // agent-proxy root (ui, local)
-                `vscode-remote://dev-container+${REMOTE_CONTAINER_URI}${containerWorkspaceFolder}/request-proxy`, // request-proxy (workspace, remote)
+                path.join(workspaceRoot, 'gpg-bridge-agent'), // gpg-bridge-agent root (ui, local)
+                `vscode-remote://dev-container+${REMOTE_CONTAINER_URI}${containerWorkspaceFolder}/gpg-bridge-request`, // gpg-bridge-request (workspace, remote)
             ],
 
             // Mocha entry point runs in the remote (Linux) extension host.
             // Local Windows path would run tests in the local host where the Unix socket
-            // doesn't exist. Remote URI ensures tests run alongside request-proxy in
+            // doesn't exist. Remote URI ensures tests run alongside gpg-bridge-request in
             // the container where the Assuan Unix socket is created.
-            extensionTestsPath: `vscode-remote://dev-container+${REMOTE_CONTAINER_URI}${containerWorkspaceFolder}/request-proxy/out/test/integration/suite/requestProxyIndex`,
+            extensionTestsPath: `vscode-remote://dev-container+${REMOTE_CONTAINER_URI}${containerWorkspaceFolder}/gpg-bridge-request/out/test/integration/suite/requestProxyIndex`,
 
             launchArgs: [
                 // Open the workspace using its in-container path. Passing workspaceRoot
@@ -200,8 +200,8 @@ async function main(): Promise<void> {
             ],
 
             // Inject GNUPGHOME and test key metadata into the VS Code process env.
-            // VSCODE_INTEGRATION_TEST=1 → isIntegrationTestEnvironment() = true in agent-proxy.
-            //   (request-proxy in the container picks this up via devcontainer.json remoteEnv.)
+            // VSCODE_INTEGRATION_TEST=1 → isIntegrationTestEnvironment() = true in gpg-bridge-agent.
+            //   (gpg-bridge-request in the container picks this up via devcontainer.json remoteEnv.)
             // GNUPGHOME → agent-proxy uses the isolated Windows keyring.
             // TEST_KEY_FINGERPRINT / TEST_KEY_KEYGRIP → VS Code process env via extensionTestsEnv;
             //   devcontainer.json remoteEnv uses ${localEnv:...} to forward them into the

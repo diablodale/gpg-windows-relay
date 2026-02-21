@@ -34,7 +34,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { expect } from 'chai';
-import { GpgCli, assertSafeToDelete } from '@gpg-relay/shared/test/integration';
+import { GpgCli, assertSafeToDelete } from '@gpg-bridge/shared/test/integration';
 
 // Env vars injected into the container's remote extension host via:
 //   gpgCliRunTest.ts extensionTestsEnv  →  VS Code process env
@@ -82,7 +82,7 @@ describe('Phase 3 — gpg CLI → request-proxy → agent-proxy → gpg-agent', 
         // 2. Wait for request-proxy to be ready.
         //    request-proxy places the Unix socket at $GNUPGHOME/S.gpg-agent on startup.
         //    Poll for the socket file to exist before issuing any gpg commands.
-        //    (Phase 3 doesn't register _gpg-request-proxy.test.getSocketPath because
+        //    (Phase 3 doesn't register _gpg-bridge-request.test.getSocketPath because
         //    gpg locates the socket via GNUPGHOME automatically — no helper needed.)
         // ----------------------------------------------------------------
         const socketFile = path.join(LINUX_GNUPGHOME, 'S.gpg-agent');
@@ -144,7 +144,7 @@ describe('Phase 3 — gpg CLI → request-proxy → agent-proxy → gpg-agent', 
         } catch { /* ignore */ }
 
         // Reset extension state so subsequent test runs start clean.
-        try { await vscode.commands.executeCommand('gpg-request-proxy.stop'); } catch { /* ignore */ }
+        try { await vscode.commands.executeCommand('gpg-bridge-request.stop'); } catch { /* ignore */ }
     });
 
     // -----------------------------------------------------------------------

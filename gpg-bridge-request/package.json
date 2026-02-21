@@ -1,18 +1,18 @@
 {
-  "name": "gpg-request-proxy",
-  "displayName": "GPG Request Proxy",
-  "description": "Remote request proxy component for GPG relay",
+  "name": "gpg-bridge-request",
+  "displayName": "GPG Bridge Request",
+  "description": "Remote request proxy component for GPG Bridge",
   "version": "0.0.1",
   "preview": true,
   "publisher": "local",
   "license": "See LICENSE file",
   "repository": {
     "type": "git",
-    "url": "https://github.com/diablodale/gpg-windows-relay"
+    "url": "https://github.com/diablodale/gpg-bridge"
   },
   "qna": false,
   "bugs": {
-    "url": "https://github.com/diablodale/gpg-windows-relay/issues"
+    "url": "https://github.com/diablodale/gpg-bridge/issues"
   },
   "engines": {
     "vscode": "^1.108.1",
@@ -21,8 +21,9 @@
   "extensionKind": [
     "workspace"
   ],
+  "api": "none",
   "extensionDependencies": [
-    "local.gpg-agent-proxy"
+    "local.gpg-bridge-agent"
   ],
   "categories": [
     "Other"
@@ -40,18 +41,18 @@
   "contributes": {
     "commands": [
       {
-        "command": "gpg-request-proxy.start",
-        "title": "GPG Request Proxy: Start"
+        "command": "gpg-bridge-request.start",
+        "title": "GPG Bridge Request: Start"
       },
       {
-        "command": "gpg-request-proxy.stop",
-        "title": "GPG Request Proxy: Stop"
+        "command": "gpg-bridge-request.stop",
+        "title": "GPG Bridge Request: Stop"
       }
     ],
     "configuration": {
-      "title": "GPG Request Proxy",
+      "title": "GPG Bridge Request",
       "properties": {
-        "gpgRequestProxy.debugLogging": {
+        "gpgBridgeRequest.debugLogging": {
           "type": "boolean",
           "default": false,
           "description": "Enable debug logging for troubleshooting"
@@ -75,7 +76,7 @@
     "package": "vsce package"
   },
   "dependencies": {
-    "@gpg-relay/shared": "file:../shared",
+    "@gpg-bridge/shared": "file:../shared",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

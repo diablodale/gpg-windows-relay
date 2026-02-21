@@ -1,8 +1,8 @@
 /**
  * Phase 1 Integration Tests: agent-proxy ↔ Real gpg-agent
  *
- * Exercises the three inter-extension commands (_gpg-agent-proxy.connectAgent,
- * _gpg-agent-proxy.sendCommands, _gpg-agent-proxy.disconnectAgent) against the
+ * Exercises the three inter-extension commands (_gpg-bridge-agent.connectAgent,
+ * _gpg-bridge-agent.sendCommands, _gpg-bridge-agent.disconnectAgent) against the
  * real gpg-agent running in an isolated GNUPGHOME created by runTest.ts.
  *
  * Prerequisites (all managed by runTest.ts BEFORE the extension host starts):
@@ -17,7 +17,7 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { expect } from 'chai';
-import { GpgCli } from '@gpg-relay/shared/test/integration';
+import { GpgCli } from '@gpg-bridge/shared/test/integration';
 
 // ---------------------------------------------------------------------------
 // Type aliases matching the command signatures in agent-proxy/src/extension.ts
@@ -56,7 +56,7 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
             try { await cli.deleteKey(fingerprint); } catch { /* ignore if already deleted */ }
         }
         // Reset extension state so subsequent test runs start clean.
-        try { await vscode.commands.executeCommand('gpg-agent-proxy.stop'); } catch { /* ignore */ }
+        try { await vscode.commands.executeCommand('gpg-bridge-agent.stop'); } catch { /* ignore */ }
     });
 
     // -----------------------------------------------------------------------
@@ -64,14 +64,14 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
     // -----------------------------------------------------------------------
     it('1. connectAgent returns a valid sessionId and OK greeting', async function () {
         const result = await vscode.commands.executeCommand<ConnectResult>(
-            '_gpg-agent-proxy.connectAgent'
+            '_gpg-bridge-agent.connectAgent'
         );
         expect(result).to.be.an('object');
         expect(result.sessionId).to.be.a('string').and.have.length.greaterThan(0);
         expect(result.greeting).to.match(/^OK/);
 
         // Clean up
-        await vscode.commands.executeCommand('_gpg-agent-proxy.disconnectAgent', result.sessionId);
+        await vscode.commands.executeCommand('_gpg-bridge-agent.disconnectAgent', result.sessionId);
     });
 
     // -----------------------------------------------------------------------
@@ -79,18 +79,18 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
     // -----------------------------------------------------------------------
     it('2. GETINFO version returns version data ending with OK', async function () {
         const { sessionId } = await vscode.commands.executeCommand<ConnectResult>(
-            '_gpg-agent-proxy.connectAgent'
+            '_gpg-bridge-agent.connectAgent'
         );
         try {
             const { response } = await vscode.commands.executeCommand<SendResult>(
-                '_gpg-agent-proxy.sendCommands', sessionId, 'GETINFO version\n'
+                '_gpg-bridge-agent.sendCommands', sessionId, 'GETINFO version\n'
             );
             // Extra socket returns version as a D (data) record: 'D 2.4.8\nOK\n'
             // (not an S status record as on the main socket)
             expect(response).to.match(/^D \d+\.\d+/m);
             expect(response).to.match(/OK\s*$/m);
         } finally {
-            await vscode.commands.executeCommand('_gpg-agent-proxy.disconnectAgent', sessionId);
+            await vscode.commands.executeCommand('_gpg-bridge-agent.disconnectAgent', sessionId);
         }
     });
 
@@ -99,7 +99,7 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
     // -----------------------------------------------------------------------
     it('3. HAVEKEY confirms isolated agent has access to the test key', async function () {
         const { sessionId } = await vscode.commands.executeCommand<ConnectResult>(
-            '_gpg-agent-proxy.connectAgent'
+            '_gpg-bridge-agent.connectAgent'
         );
         try {
             // HAVEKEY checks whether a secret key exists in the agent's key store
@@ -108,11 +108,11 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
             //   2. The agent is running against THAT keyring, not the system keyring.
             // If isolation were broken this would return ERR ... No secret key.
             const { response } = await vscode.commands.executeCommand<SendResult>(
-                '_gpg-agent-proxy.sendCommands', sessionId, `HAVEKEY ${keygrip}\n`
+                '_gpg-bridge-agent.sendCommands', sessionId, `HAVEKEY ${keygrip}\n`
             );
             expect(response).to.match(/^OK\s*$/m);
         } finally {
-            await vscode.commands.executeCommand('_gpg-agent-proxy.disconnectAgent', sessionId);
+            await vscode.commands.executeCommand('_gpg-bridge-agent.disconnectAgent', sessionId);
         }
     });
 
@@ -121,15 +121,15 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
     // -----------------------------------------------------------------------
     it('4. unknown command resolves with ERR response (does not reject)', async function () {
         const { sessionId } = await vscode.commands.executeCommand<ConnectResult>(
-            '_gpg-agent-proxy.connectAgent'
+            '_gpg-bridge-agent.connectAgent'
         );
         try {
             const { response } = await vscode.commands.executeCommand<SendResult>(
-                '_gpg-agent-proxy.sendCommands', sessionId, 'NOTACOMMAND\n'
+                '_gpg-bridge-agent.sendCommands', sessionId, 'NOTACOMMAND\n'
             );
             expect(response).to.match(/^ERR/);
         } finally {
-            await vscode.commands.executeCommand('_gpg-agent-proxy.disconnectAgent', sessionId);
+            await vscode.commands.executeCommand('_gpg-bridge-agent.disconnectAgent', sessionId);
         }
     });
 
@@ -138,17 +138,17 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
     // -----------------------------------------------------------------------
     it('5. disconnectAgent resolves; subsequent sendCommands rejects', async function () {
         const { sessionId } = await vscode.commands.executeCommand<ConnectResult>(
-            '_gpg-agent-proxy.connectAgent'
+            '_gpg-bridge-agent.connectAgent'
         );
 
         // Disconnect should resolve cleanly
-        await vscode.commands.executeCommand('_gpg-agent-proxy.disconnectAgent', sessionId);
+        await vscode.commands.executeCommand('_gpg-bridge-agent.disconnectAgent', sessionId);
 
         // Sending on a closed session should reject
         let threw = false;
         try {
             await vscode.commands.executeCommand<SendResult>(
-                '_gpg-agent-proxy.sendCommands', sessionId, 'GETINFO version\n'
+                '_gpg-bridge-agent.sendCommands', sessionId, 'GETINFO version\n'
             );
         } catch {
             threw = true;
@@ -162,9 +162,9 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
     it('6. three concurrent sessions are independent with OK greetings', async function () {
         // Open three sessions simultaneously
         const [r1, r2, r3] = await Promise.all([
-            vscode.commands.executeCommand<ConnectResult>('_gpg-agent-proxy.connectAgent'),
-            vscode.commands.executeCommand<ConnectResult>('_gpg-agent-proxy.connectAgent'),
-            vscode.commands.executeCommand<ConnectResult>('_gpg-agent-proxy.connectAgent')
+            vscode.commands.executeCommand<ConnectResult>('_gpg-bridge-agent.connectAgent'),
+            vscode.commands.executeCommand<ConnectResult>('_gpg-bridge-agent.connectAgent'),
+            vscode.commands.executeCommand<ConnectResult>('_gpg-bridge-agent.connectAgent')
         ]);
 
         const results = [r1, r2, r3];
@@ -179,7 +179,7 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
             });
         } finally {
             await Promise.all(results.map(r =>
-                vscode.commands.executeCommand('_gpg-agent-proxy.disconnectAgent', r.sessionId)
+                vscode.commands.executeCommand('_gpg-bridge-agent.disconnectAgent', r.sessionId)
             ));
         }
     });
@@ -189,19 +189,19 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
     // -----------------------------------------------------------------------
     it('7. PKSIGN flow: full sign sequence returns D <signature> + OK', async function () {
         const { sessionId } = await vscode.commands.executeCommand<ConnectResult>(
-            '_gpg-agent-proxy.connectAgent'
+            '_gpg-bridge-agent.connectAgent'
         );
         try {
             // Option setup — allow-pinentry-notify is forbidden on the extra socket;
             // agent-awareness is sufficient for a no-passphrase key.
-            await assertOk('_gpg-agent-proxy.sendCommands', sessionId, 'OPTION agent-awareness=2.1.0\n');
-            await assertOk('_gpg-agent-proxy.sendCommands', sessionId, 'RESET\n');
+            await assertOk('_gpg-bridge-agent.sendCommands', sessionId, 'OPTION agent-awareness=2.1.0\n');
+            await assertOk('_gpg-bridge-agent.sendCommands', sessionId, 'RESET\n');
 
             // Identify the signing key by keygrip (SIGKEY requires keygrip, not fingerprint)
-            await assertOk('_gpg-agent-proxy.sendCommands', sessionId, `SIGKEY ${keygrip}\n`);
+            await assertOk('_gpg-bridge-agent.sendCommands', sessionId, `SIGKEY ${keygrip}\n`);
 
             // URL-encoded key description (+ = space in Assuan percent-encoding)
-            await assertOk('_gpg-agent-proxy.sendCommands', sessionId, 'SETKEYDESC Integration+Test+Signing\n');
+            await assertOk('_gpg-bridge-agent.sendCommands', sessionId, 'SETKEYDESC Integration+Test+Signing\n');
 
             // libgcrypt algorithm ID 10 = SHA-512
             const sha512hex = crypto
@@ -209,19 +209,19 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
                 .update(Buffer.from('test data'))
                 .digest('hex')
                 .toUpperCase();
-            await assertOk('_gpg-agent-proxy.sendCommands', sessionId, `SETHASH 10 ${sha512hex}\n`);
+            await assertOk('_gpg-bridge-agent.sendCommands', sessionId, `SETHASH 10 ${sha512hex}\n`);
 
             // Execute the sign operation.
             // With a no-passphrase key, INQUIRE PINENTRY_LAUNCHED is NOT generated;
             // the agent returns the signature directly.
             const { response } = await vscode.commands.executeCommand<SendResult>(
-                '_gpg-agent-proxy.sendCommands', sessionId, 'PKSIGN\n'
+                '_gpg-bridge-agent.sendCommands', sessionId, 'PKSIGN\n'
             );
             // Response must contain at least one data block (signature bytes)
             expect(response).to.include('D ');
             expect(response).to.match(/OK\s*$/m);
         } finally {
-            await vscode.commands.executeCommand('_gpg-agent-proxy.disconnectAgent', sessionId);
+            await vscode.commands.executeCommand('_gpg-bridge-agent.disconnectAgent', sessionId);
         }
     });
 
@@ -230,14 +230,14 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
     // -----------------------------------------------------------------------
     it('8. invalid session ID rejects; valid session continues working', async function () {
         const { sessionId } = await vscode.commands.executeCommand<ConnectResult>(
-            '_gpg-agent-proxy.connectAgent'
+            '_gpg-bridge-agent.connectAgent'
         );
         try {
             // Using a bogus session ID should reject
             let threw = false;
             try {
                 await vscode.commands.executeCommand<SendResult>(
-                    '_gpg-agent-proxy.sendCommands', 'bogus-session-id-that-does-not-exist', 'GETINFO version\n'
+                    '_gpg-bridge-agent.sendCommands', 'bogus-session-id-that-does-not-exist', 'GETINFO version\n'
                 );
             } catch {
                 threw = true;
@@ -246,11 +246,11 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
 
             // The valid session opened earlier is unaffected by the error above
             const { response } = await vscode.commands.executeCommand<SendResult>(
-                '_gpg-agent-proxy.sendCommands', sessionId, 'GETINFO version\n'
+                '_gpg-bridge-agent.sendCommands', sessionId, 'GETINFO version\n'
             );
             expect(response).to.match(/OK\s*$/m);
         } finally {
-            await vscode.commands.executeCommand('_gpg-agent-proxy.disconnectAgent', sessionId);
+            await vscode.commands.executeCommand('_gpg-bridge-agent.disconnectAgent', sessionId);
         }
     });
 
@@ -261,9 +261,9 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
         // --- Part A: bad config ---
         // Stop the proxy first so detectedGpg4winPath/detectedAgentSocket are cleared
         // and the next start must re-detect from scratch using the config value.
-        await vscode.commands.executeCommand('gpg-agent-proxy.stop');
+        await vscode.commands.executeCommand('gpg-bridge-agent.stop');
 
-        const config = vscode.workspace.getConfiguration('gpgAgentProxy');
+        const config = vscode.workspace.getConfiguration('gpgBridgeAgent');
         await config.update('gpg4winPath', 'C:\\nonexistent-gpg4win-path', vscode.ConfigurationTarget.Global);
 
         try {
@@ -274,7 +274,7 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
             let startThrew = false;
             let startError = '';
             try {
-                await vscode.commands.executeCommand('gpg-agent-proxy.start');
+                await vscode.commands.executeCommand('gpg-bridge-agent.start');
             } catch (err) {
                 startThrew = true;
                 startError = err instanceof Error ? err.message : String(err);
@@ -285,7 +285,7 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
             // connectAgent must also reject — agentProxyService was never initialized
             let connectThrew = false;
             try {
-                await vscode.commands.executeCommand<ConnectResult>('_gpg-agent-proxy.connectAgent');
+                await vscode.commands.executeCommand<ConnectResult>('_gpg-bridge-agent.connectAgent');
             } catch {
                 connectThrew = true;
             }
@@ -297,17 +297,17 @@ describe('Phase 1 — agent-proxy ↔ Real gpg-agent', function () {
 
         // --- Part B: recovery ---
         // With the config restored to default, auto-detection should find Gpg4win again.
-        await vscode.commands.executeCommand('gpg-agent-proxy.start');
+        await vscode.commands.executeCommand('gpg-bridge-agent.start');
 
         // Give the start a moment to complete async initialization
         await new Promise(resolve => setTimeout(resolve, 500));
 
         // Proxy should be fully operational
         const { sessionId, greeting } = await vscode.commands.executeCommand<ConnectResult>(
-            '_gpg-agent-proxy.connectAgent'
+            '_gpg-bridge-agent.connectAgent'
         );
         expect(greeting).to.match(/^OK/);
-        await vscode.commands.executeCommand('_gpg-agent-proxy.disconnectAgent', sessionId);
+        await vscode.commands.executeCommand('_gpg-bridge-agent.disconnectAgent', sessionId);
     });
 });
 

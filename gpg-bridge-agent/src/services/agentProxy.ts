@@ -12,8 +12,8 @@ import * as net from 'net';
 import * as fs from 'fs';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import { log, encodeProtocolData, decodeProtocolData, parseSocketFile, extractErrorMessage, sanitizeForLog, detectResponseCompletion, cleanupSocket } from '@gpg-relay/shared';
-import type { LogConfig, IFileSystem, ISocketFactory, ISessionManager } from '@gpg-relay/shared';
+import { log, encodeProtocolData, decodeProtocolData, parseSocketFile, extractErrorMessage, sanitizeForLog, detectResponseCompletion, cleanupSocket } from '@gpg-bridge/shared';
+import type { LogConfig, IFileSystem, ISocketFactory, ISessionManager } from '@gpg-bridge/shared';
 
 // ============================================================================
 // State Machine Type Definitions

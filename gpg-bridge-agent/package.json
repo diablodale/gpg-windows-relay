@@ -1,18 +1,18 @@
 {
-  "name": "gpg-agent-proxy",
-  "displayName": "GPG Agent Proxy",
-  "description": "Windows agent proxy component for GPG relay",
+  "name": "gpg-bridge-agent",
+  "displayName": "GPG Bridge Agent",
+  "description": "Windows agent proxy component for GPG Bridge",
   "version": "0.0.1",
   "preview": true,
   "publisher": "local",
   "license": "See LICENSE file",
   "repository": {
     "type": "git",
-    "url": "https://github.com/diablodale/gpg-windows-relay"
+    "url": "https://github.com/diablodale/gpg-bridge"
   },
   "qna": false,
   "bugs": {
-    "url": "https://github.com/diablodale/gpg-windows-relay/issues"
+    "url": "https://github.com/diablodale/gpg-bridge/issues"
   },
   "engines": {
     "vscode": "^1.108.1",
@@ -41,32 +41,28 @@
   "contributes": {
     "commands": [
       {
-        "command": "gpg-agent-proxy.start",
-        "title": "GPG Agent Proxy: Start"
+        "command": "gpg-bridge-agent.start",
+        "title": "GPG Bridge Agent: Start"
       },
       {
-        "command": "gpg-agent-proxy.stop",
-        "title": "GPG Agent Proxy: Stop"
+        "command": "gpg-bridge-agent.stop",
+        "title": "GPG Bridge Agent: Stop"
       },
       {
-        "command": "gpg-agent-proxy.restart",
-        "title": "GPG Agent Proxy: Restart"
-      },
-      {
-        "command": "gpg-agent-proxy.showStatus",
-        "title": "GPG Agent Proxy: Show Status"
+        "command": "gpg-bridge-agent.showStatus",
+        "title": "GPG Bridge Agent: Show Status"
       }
     ],
     "configuration": {
-      "title": "GPG Agent Proxy",
+      "title": "GPG Bridge Agent",
       "properties": {
-        "gpgAgentProxy.gpg4winPath": {
+        "gpgBridgeAgent.gpg4winPath": {
           "type": "string",
           "default": "",
           "markdownDescription": "Path to Gpg4win's GnuPG bin directory containing `gpgconf.exe`. Leave empty to auto-detect.",
           "scope": "resource"
         },
-        "gpgAgentProxy.debugLogging": {
+        "gpgBridgeAgent.debugLogging": {
           "type": "boolean",
           "default": false,
           "description": "Enable debug logging for troubleshooting"
@@ -88,7 +84,7 @@
     "package": "vsce package"
   },
   "dependencies": {
-    "@gpg-relay/shared": "file:../shared",
+    "@gpg-bridge/shared": "file:../shared",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
