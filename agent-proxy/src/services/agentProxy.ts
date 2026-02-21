@@ -867,31 +867,51 @@ export class AgentProxy {
     }
 
     /**
-     * Stop the agent proxy and force-close all active sessions.
+     * Stop the agent proxy and await deterministic cleanup of all active sessions.
      *
      * Called by stopAgentProxy() before the AgentProxy instance is dropped.
-     * Without this, open TCP sockets to gpg-agent would leak until GC.
+     * Resolves only after every triggered session has emitted CLEANUP_COMPLETE,
+     * ensuring no TCP sockets leak and VS Code can correctly await deactivate().
      *
-     * Each session is force-destroyed (not gracefully disconnected) because
-     * we cannot await individual BYE handshakes during a synchronous stop.
-     * The socket destroy() triggers the 'close' event on each session, which
-     * drives the state machine through CLEANUP_REQUESTED → CLOSING → CLEANUP_COMPLETE
-     * and removes the session from the Map via the CLEANUP_COMPLETE listener.
+     * Three-way split by session state:
+     * 1. DISCONNECTED / FATAL: skip — already clean or unrecoverable (FATAL has no
+     *    transitions and will never emit CLEANUP_COMPLETE)
+     * 2. ERROR / CLOSING: register CLEANUP_COMPLETE listener only — these sessions
+     *    are already progressing through teardown; emitting ERROR_OCCURRED would be
+     *    an invalid transition and the once() handler is already consumed
+     * 3. All other active states: register listener AND emit ERROR_OCCURRED to
+     *    drive them into teardown
      */
-    public stop(): void {
+    public async stop(): Promise<void> {
         if (this.sessions.size === 0) {
             return;
         }
         log(this.config, `[AgentProxy] Stopping ${this.sessions.size} active session(s)`);
         const stopError = new Error('AgentProxy stopped');
+        const cleanupPromises: Promise<void>[] = [];
+
         for (const [sessionId, session] of this.sessions) {
             const state = session.getState();
-            // Only trigger cleanup for sessions that have open sockets.
-            // Sessions already in ERROR, CLOSING, or FATAL are already being cleaned up.
-            if (state !== 'DISCONNECTED' && state !== 'ERROR' && state !== 'CLOSING' && state !== 'FATAL') {
+
+            // 1. DISCONNECTED / FATAL: skip
+            if (state === 'DISCONNECTED' || state === 'FATAL') {
+                continue;
+            }
+
+            // 2 & 3. Register CLEANUP_COMPLETE listener (always); emit ERROR_OCCURRED only
+            // for active states that have not yet entered the teardown sequence.
+            const promise = new Promise<void>((resolve) => {
+                session.once('CLEANUP_COMPLETE', () => resolve());
+            });
+            cleanupPromises.push(promise);
+
+            if (state !== 'ERROR' && state !== 'CLOSING') {
                 log(this.config, `[${sessionId}] Force-closing session during stop (state: ${state})`);
                 session.emit('ERROR_OCCURRED', { error: stopError });
             }
         }
+
+        await Promise.all(cleanupPromises);
+        log(this.config, '[AgentProxy] All sessions cleaned up');
     }
 }

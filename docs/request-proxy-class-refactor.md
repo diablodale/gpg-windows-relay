@@ -431,22 +431,20 @@ three-way split by current state:
 `await Promise.all(cleanupPromises)` — resolves only when every triggered/in-progress
 session has fully cleaned up and been removed from the Map.
 
-- [ ] **6.1** `agent-proxy/src/services/agentProxy.ts`: change `stop()` signature to
+- [x] **6.1** `agent-proxy/src/services/agentProxy.ts`: change `stop()` signature to
   `public async stop(): Promise<void>`
-- [ ] **6.2** In the sessions loop: apply the three-way split from the sketch above —
+- [x] **6.2** In the sessions loop: apply the three-way split from the sketch above —
   skip DISCONNECTED/FATAL; for ERROR/CLOSING register `session.once('CLEANUP_COMPLETE',
   resolve)` only; for all other active states register the listener **and** emit
   `ERROR_OCCURRED`; push each promise to `cleanupPromises[]`
-- [ ] **6.3** After the emit loop: `await Promise.all(cleanupPromises)` so `stop()`
+- [x] **6.3** After the emit loop: `await Promise.all(cleanupPromises)` so `stop()`
   resolves only when every triggered session has reached CLEANUP_COMPLETE
-- [ ] **6.4** `agent-proxy/src/extension.ts`: update `stopAgentProxy()` to
-  `await agentProxyService.stop()` — `deactivate()` already returns the bare Promise
-  from Phase 1.6 so VS Code will correctly await the now-async `stop()` without any
-  further change to `deactivate()`
-- [ ] **6.5** Compile full repo (`npm run compile`), run all tests (`npm test` +
+- [x] **6.4** `agent-proxy/src/extension.ts`: `stopAgentProxy()` already uses
+  `await agentProxyService.stop()` from Phase 1.5 — no further change required
+- [x] **6.5** Compile full repo (`npm run compile`), run all tests (`npm test` +
   `npm run test:integration`), verify clean
-- [ ] **6.6** Commit: `refactor(agent-proxy): make stop() async with deterministic cleanup`
-- [ ] **6.7** ✅ Phase gate: all tests green, committed — refactor complete
+- [x] **6.6** Commit: `refactor(agent-proxy): make stop() async with deterministic cleanup`
+- [x] **6.7** ✅ Phase gate: all tests green, committed — refactor complete
 
 ---
 
@@ -474,4 +472,4 @@ session has fully cleaned up and been removed from the Map.
 | 3 | `RequestProxy` class replaces factory function | ✅ Complete |
 | 4 | `extension.ts` uses `RequestProxy` | ✅ Complete |
 | 5 | Tighten `ISessionManager.sessionId` | ✅ Complete |
-| 6 | `AgentProxy.stop()` async with deterministic cleanup | ⏳ Not started |
+| 6 | `AgentProxy.stop()` async with deterministic cleanup | ✅ Complete |
